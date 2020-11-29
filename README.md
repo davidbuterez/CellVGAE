@@ -26,9 +26,13 @@ numpy==1.19.4
 scikit_learn==0.23.2
 umap==0.1.1
 ```
-We also used CellVGAE successfully with PyTorch 1.7.0 and PyTorch Geometric 1.7.0. 
+The used CUDA toolkit version is 10.2. We also used CellVGAE successfully with PyTorch 1.7.0 and PyTorch Geometric 1.7.0 (CUDA 11.0). 
 
-[graph-tool](https://graph-tool.skewed.de/) is currently only available on Linux/MAC OS.
+[graph-tool](https://graph-tool.skewed.de/) is currently only available on Linux/Mac OS.
+
+The version of R we used is 4.0.2. The following libraries are required:
+
+`Seurat 3`, `scran`, `SingleCellExperiment`. `scRNAseq`, `BiocSingular`, `igraph`, `dplyr` and `textshape`.
 
 ## Usage
 
