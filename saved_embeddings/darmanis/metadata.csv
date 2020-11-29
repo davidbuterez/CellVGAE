@@ -1,0 +1,15 @@
+batch,64
+hidden_dim,128
+latent_dim,50
+lr,0.0001
+attn_heads,10
+hidden_layer1,"GATConv(250, 128, heads=10)"
+hidden_layer2,"GATConv(1280, 128, heads=10)"
+conv_mean_layer,"GATConv(1280, 50, heads=10)"
+conv_log_std_layer,"GATConv(1280, 50, heads=10)"
+gene_expr_file,../HVG/Darmanis_HVG_250.csv
+graph_file,../KNN/Darmanis_All_KNN_k5_d100.txt
+ari,0.947237728657565
+silhouette,0.77236277
+num_clusters,8
+noise,0

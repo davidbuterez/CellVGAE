@@ -1,0 +1,15 @@
+batch,64
+hidden_dim,128
+latent_dim,50
+lr,0.0001
+attn_heads,10
+hidden_layer1,"GATConv(500, 128, heads=10)"
+hidden_layer2,"GATConv(1280, 128, heads=10)"
+conv_mean_layer,"GATConv(1280, 50, heads=10)"
+conv_log_std_layer,"GATConv(1280, 50, heads=10)"
+gene_expr_file,../HVG/Seger_HVG_500.csv
+graph_file,../Pearson/pearson_graph_hvg_500_k5.txt
+ari,0.973418876932952
+silhouette,0.6701896
+num_clusters,10
+noise,0

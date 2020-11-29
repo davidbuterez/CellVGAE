@@ -1,0 +1,15 @@
+batch,64
+hidden_dim,128
+latent_dim,50
+lr,0.0001
+attn_heads,5
+hidden_layer1,"GATConv(500, 128, heads=5)"
+hidden_layer2,"GATConv(640, 128, heads=5)"
+conv_mean_layer,"GATConv(640, 50, heads=5)"
+conv_log_std_layer,"GATConv(640, 50, heads=5)"
+gene_expr_file,HVG/Baron4_HVG_250.csv
+graph_file,KNN/Baron4_HVG_250_KNN_k5_d10.txt
+ari,0.976375830870997
+silhouette,0.74736804
+num_clusters,7
+discarded,0
