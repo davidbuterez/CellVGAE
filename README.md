@@ -2,7 +2,7 @@
 
 An unsupervised scRNA-seq analysis workflow with graph attention networks
 
-![CellVGAE](figures\workflow.png)
+![](figures/workflow.png)
 
 
 
@@ -34,7 +34,7 @@ We also used CellVGAE successfully with PyTorch 1.7.0 and PyTorch Geometric 1.7.
 
 The `train.py` file can be invoked with the following options:
 
-```bash
+```
 train [-h] [--hvg_file HVG_FILE] [--graph_file GRAPH_FILE] [--num_hidden_layers NUM_HIDDEN_LAYERS] [--num_heads NUM_HEADS] [--hidden_dims [HIDDEN_DIMS [HIDDEN_DIMS ...]]] [--dropout [DROPOUT [DROPOUT ...]]] [--latent_dim LATENT_DIM] [--loss {kl,mmd}] [--lr LR] [--batch_size BATCH_SIZE] [--epochs EPOCHS] [--val_split VAL_SPLIT] [--node_out NODE_OUT] [--save_trained_model SAVE_TRAINED_MODEL]
 
 Train CellVGAE
