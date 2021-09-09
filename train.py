@@ -11,17 +11,20 @@ import argparse
 from multiprocessing.sharedctypes import Value
 from random import choices
 from pathlib import Path
-from tkinter import E
+from tkinter import E, N
 import torch
 
+import seaborn as sns
 import pandas as pd
 import numpy as np
 import anndata
 import scanpy as sc
 import faiss
+import random
 
 import umap
 import hdbscan
+import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 from sklearn.metrics.cluster import adjusted_rand_score as ARI
 from pathlib import Path
@@ -198,8 +201,8 @@ def prepare_graphs(adata_khvg, X_khvg, args):
 
     print(f'The graph has {len(edgelist)} edges.')
 
-    if args['graph_save_path']:
-        Path(args['graph_save_path']).mkdir(parents=True, exist_ok=True)
+    if args['save_graph']:
+        Path(args['model_save_path']).mkdir(parents=True, exist_ok=True)
 
         num_hvg = X_khvg.shape[1] if args['transpose_input'] else X_khvg.shape[0]
         k_file = args['k']
@@ -219,7 +222,7 @@ def prepare_graphs(adata_khvg, X_khvg, args):
         if args['graph_distance_cutoff_num_stds']:
             filename = filename.split('.')[0] + '_cutoff_{:.4f}.txt'.format(cutoff)
 
-        final_path = os.path.join(args['graph_save_path'], filename)
+        final_path = os.path.join(args['model_save_path'], filename)
         print(f'Saving graph to {final_path}...')
         with open(final_path, 'w') as f:
             edges = [' '.join(e) + '\n' for e in edgelist]
@@ -372,6 +375,11 @@ def setup(args):
     return model, optimizer, train_loader
 
 
+def _get_filepath(args, number_or_name, edge_or_weights):
+    layer_filename = f'GAT_Layer_{number_or_name}_{edge_or_weights}.pt'
+    return os.path.join(args['model_save_path'], layer_filename)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='train', description='Train CellVGAE.')
 
@@ -383,7 +391,7 @@ if __name__ == '__main__':
     parser.add_argument('--graph_n_pcs', type=int, help='Use this many Principal Components for the KNN (only Scanpy).')
     parser.add_argument('--graph_metric', choices=['euclidean', 'manhattan', 'cosine'], default='euclidean')
     parser.add_argument('--graph_distance_cutoff_num_stds', type=float, default=0.0, help='Number of standard deviations to add to the mean of distances/correlation values. Can be negative.')
-    parser.add_argument('--graph_save_path', help='(Optional) save the generated graph to this path. Will create the entire path if necessary.')
+    parser.add_argument('--save_graph', action='store_true', default=False, help='(Optional) save the generated graph to the output path specified by --model_save_path.')
     parser.add_argument('--raw_counts', action='store_true', default=False)
     parser.add_argument('--faiss_gpu', action='store_true', help='Use Faiss on the GPU (only for KNN Faiss).', default=False)
     parser.add_argument('--hvg_file_path', help='HVG file if not using command line options to generate it.')
@@ -403,8 +411,9 @@ if __name__ == '__main__':
     parser.add_argument('--use_linear_decoder', action='store_true', default=False, help='Turn on a neural network decoder, similar to traditional VAEs.')
     parser.add_argument('--decoder_nn_dim1', help='First hidden dimenson for the neural network decoder, if specified using --use_linear_decoder.', type=int)
     parser.add_argument('--name', help='Name used for the written output files.', type=str)
-    parser.add_argument('--node_embeddings_save_path', help='(Optional) Output path for the computed node embeddings (saved in numpy .npy format). Will create the entire path if necessary.', type=str)
-    parser.add_argument('--model_save_path', help='(Optional) Path to save PyTorch model. Will create the entire path if necessary.', type=str)
+    parser.add_argument('--model_save_path', required=True, help='Path to save PyTorch model and output files. Will create the entire path if necessary.', type=str)
+    parser.add_argument('--umap', action='store_true', default=True, help='Compute and save the 2D UMAP embeddings of the output node features.')
+    parser.add_argument('--hdbscan', action='store_true', default=True, help='Compute and save different HDBSCAN clusterings.')
 
     args = parser.parse_args()
 
@@ -453,8 +462,9 @@ if __name__ == '__main__':
     if (args['graph_file_path'] is not None) and (args['k'] is not None):
         raise ValueError('Cannot use custom graph file when --k is specified.')
 
-    if (args['graph_file_path'] is not None) and (args['graph_save_path'] is not None):
-        raise ValueError('Cannot use custom graph file when --graph_save_path is specified.')
+    if (args['graph_file_path'] is not None) and (args['save_graph']):
+        print(args['save_graph'])
+        raise ValueError('Cannot use custom graph file when --save_graph is specified.')
 
     if (conv_type == 'GCN') and (num_heads is not None or dropout is not None):
         raise ValueError('GCN convolution not available with --num_heads or --dropout.')
@@ -467,6 +477,9 @@ if __name__ == '__main__':
 
     if (args['graph_n_pcs']) and (args['graph_type'] != 'KNN Scanpy'):
         raise ValueError('--graph_n_pcs is valid only for the "KNN Scanpy" graph type.')
+
+    if (args['hdbscan']) and (not args['umap']):
+        raise ValueError('--hdbscan is valid only if --umap is specified.')
 
     if args['dropout']:
         assert (len(dropout) == num_hidden_layers + 2), 'Number of hidden dropout values must match number of hidden layers.'
@@ -493,6 +506,7 @@ if __name__ == '__main__':
     else:
         print('No feature decoder used.\n')
 
+    # Train code
     for epoch in tqdm(range(1, args['epochs'] + 1)):
         epoch_loss, decoder_loss = train(model, optimizer, train_loader, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
         if args['use_linear_decoder']:
@@ -504,40 +518,170 @@ if __name__ == '__main__':
         #     auc, ap = test(x.to(torch.float), data.val_pos_edge_index, data.val_neg_edge_index)
         #     print('Epoch: {:03d} -- AUC: {:.4f} -- AP: {:.4f}'.format(epoch, auc, ap))
 
-    if args['node_embeddings_save_path']:
-        model = model.eval()
-        node_embeddings = []
+    # Save node embeddings
+    model = model.eval()
+    node_embeddings = []
 
-        for batch_idx, batch in enumerate(train_loader):
-            x, edge_index = batch.x.to(torch.float).to(device), batch.edge_index.to(torch.long).to(device)
-            if args['graph_convolution'] in ['GAT', 'GATv2']:
-                z_nodes, _ = model.encode(x, edge_index)
-            else:
-                z_nodes = model.encode(x, edge_index)
-            node_embeddings.append(z_nodes.cpu().detach().numpy())
-
-        node_embeddings = np.array(node_embeddings)
-        node_embeddings = node_embeddings.squeeze()
-
-        Path(args['node_embeddings_save_path']).mkdir(parents=True, exist_ok=True)
-
-        if args['name']:
-            filename = f'{args["name"]}_cellvgae_node_embeddings.npy'
+    for batch_idx, batch in enumerate(train_loader):
+        x, edge_index = batch.x.to(torch.float).to(device), batch.edge_index.to(torch.long).to(device)
+        if args['graph_convolution'] in ['GAT', 'GATv2']:
+            z_nodes, attn_w = model.encode(x, edge_index)
         else:
-            filename = 'cellvgae_node_embeddings.npy'
+            z_nodes = model.encode(x, edge_index)
+        node_embeddings.append(z_nodes.cpu().detach().numpy())
 
-        node_filepath = os.path.join(args['node_embeddings_save_path'], filename)
-        np.save(node_filepath, node_embeddings)
+    node_embeddings = np.array(node_embeddings)
+    node_embeddings = node_embeddings.squeeze()
 
-    if args['model_save_path']:
-        Path(args['model_save_path']).mkdir(parents=True, exist_ok=True)
+    Path(args['model_save_path']).mkdir(parents=True, exist_ok=True)
+
+    if args['name']:
+        filename = f'{args["name"]}_CellVGAE_node_embeddings.npy'
+    else:
+        filename = 'cellvgae_node_embeddings.npy'
+
+    node_filepath = os.path.join(args['model_save_path'], filename)
+    np.save(node_filepath, node_embeddings)
+
+    # Save model        
+    if args['name']:
+        filename = f'{args["name"]}_CellVGAE_model.pt'
+    else:
+        filename = 'cellvgae_model.pt'
+
+    model_filepath = os.path.join(args['model_save_path'], filename)
+    torch.save(model.state_dict(), model_filepath)
+
+    # Save attention weights
+    if args['graph_convolution'] in ['GAT', 'GATv2']:
+        for i in range(args['num_hidden_layers']):
+            edge_index, attention_weights = attn_w[i]
+            edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
+
+            edges_filepath = _get_filepath(args, number_or_name=i+1, edge_or_weights='edge_index')
+            attn_w_filepath = _get_filepath(args, number_or_name=i+1, edge_or_weights='attention_weights')
+
+            torch.save(edge_index, edges_filepath)
+            torch.save(attention_weights, attn_w_filepath)
         
-        if args['name']:
-            filename = f'{args["name"]}_cellvgae_model.npy'
-        else:
-            filename = 'cellvgae_model.npy'
+        edge_index, attention_weights = attn_w[-2]
+        edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
+        mu_edges_filepath = _get_filepath(args, number_or_name='mu', edge_or_weights='edge_index')
+        mu_attn_w_filepath = _get_filepath(args, number_or_name='mu', edge_or_weights='attention_weights')
+        torch.save(edge_index, mu_edges_filepath)
+        torch.save(attention_weights, mu_attn_w_filepath)
 
-        model_filepath = os.path.join(args['model_save_path'], filename)
-        torch.save(model.state_dict(), model_filepath)
+        edge_index, attention_weights = attn_w[-1]
+        edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
+        sigma_edges_filepath = _get_filepath(args, number_or_name='sigma', edge_or_weights='edge_index')
+        sigma_attn_w_filepath = _get_filepath(args, number_or_name='sigma', edge_or_weights='attention_weights')
+        torch.save(edge_index, sigma_edges_filepath)
+        torch.save(attention_weights, sigma_attn_w_filepath)
+
+    # UMAP
+    print('Computing UMAP representation...')
+    if args['umap']:
+        umap_reducer = umap.UMAP()
+        u = umap_reducer.fit_transform(node_embeddings)
+        np.save(os.path.join(args['model_save_path'], '2D_UMAP_embeddings.npy'), u)
+
+    # HDBSCAN
+    print('Computing HDBSCAN clusterings...')
+    cl_sizes = [10, 25, 50, 100]
+    min_samples = [5, 10, 25, 50]
+
+    hdbscan_dict = {}
+    if args['hdbscan']:
+        for cl_size in cl_sizes:
+            for min_sample in min_samples:
+                clusterer = hdbscan.HDBSCAN(min_cluster_size=cl_size, min_samples=min_sample)
+                clusterer.fit(u)
+                hdbscan_dict[(cl_size, min_sample)] = clusterer.labels_
+    hdbscan_save_dir = os.path.join(args['model_save_path'], 'hdbscan_clusters')
+    Path(hdbscan_save_dir).mkdir(parents=True, exist_ok=True)
+
+    for k, clusters in hdbscan_dict.items():
+        cl_size, min_sample = k
+        np.save(os.path.join(hdbscan_save_dir, f'hdbscan-clusters-min_cluster_size={cl_size}-min_samples={min_sample}.npy'), clusters)
+
+    
+    # Save plots
+    if args['umap']:
+        print('Saving UMAP plot...')
+
+        c1 = '7dba84-81171B-f4743b-073b3a-fe4a49'.split('-')
+        c2 = '473198-FFA552-FAA916-16DB65-CBEF43'.split('-')
+        c3 = 'FA198B-35A7FF-C8553D-7A306C-216869'.split('-')
+        c4 = 'A2D6F9-B88E8D-EA638C-30343F-6320EE'.split('-')
+        c5 = 'CAD5CA-FFE5D4-BFD3C1-F7AF9D-FF5D73'.split('-')
+        c6 = '3E517A-000000-A98743-611C35-BC8034'.split('-')
+        c = c1 + c2 + c3 + c4 + c5 + c6
+        c = ['#' + c_i for c_i in c]
+
+        def style_axs(axs, labelpad=3):
+            for ax in axs:
+                ax.spines['left'].set_linewidth(0.25)
+                ax.spines['top'].set_linewidth(0.25)
+                ax.spines['bottom'].set_linewidth(0.25)
+                ax.spines['right'].set_linewidth(0.25)
+                ax.set_xlabel('UMAP_1', fontsize=14, labelpad=labelpad)
+                ax.set_ylabel('UMAP_2', fontsize=14, labelpad=labelpad)
+                ax.set_yticklabels([])
+                ax.set_xticklabels([])
+                ax.set_xticks([], minor=True)
+                ax.set_yticks([], minor=True)
+                ax.xaxis.set_ticks_position('none') 
+                ax.yaxis.set_ticks_position('none') 
+                plt.xticks([])
+                plt.yticks([])
+                ax.axis('equal')
+
+        fig = plt.figure(figsize=(12, 12))
+        plt.scatter(x=u[:, 0], y=u[:, 1], s=8, linewidths=0)
+        plt.gca().set_aspect('equal')
+        ax = fig.get_children()[1]
+        style_axs([ax])
+        plt.xticks([])
+        plt.yticks([])
+        fig.tight_layout()
+        plt.savefig(os.path.join(args['model_save_path'], 'UMAP_plot.pdf'), dpi=300)
+
+    if args['hdbscan']:
+        print('Saving UMAP plots with HDBSCAN clusters...')
+        fig, axs = plt.subplots(4, 4, figsize=(18, 18))
+        plt.tight_layout(w_pad=2, h_pad=1.5)
+
+        for i in range(4):
+            for j in range(4):
+                ax = axs[i][j]
+                clusters = hdbscan_dict[(cl_sizes[i], min_samples[j])]
+                clusters_set = set(clusters)
+
+                for attempt in range(10):
+                    try:
+                        colours = random.sample(c, len(clusters_set))   
+                    except ValueError:
+                        c = c + c
+                    else:
+                        break
+                else:
+                    print('Could not plot after 10 attempts due to insufficient number of colours.')
+                    sys.exit(1)
+
+                cluster_to_colour = dict(zip(clusters_set, colours))
+                colours_to_plot = [cluster_to_colour[clstr] for clstr in clusters]
+                
+                # ax.scatter(x=u[:, 0], y=u[:, 1], s=8, linewidths=0, c=colours_to_plot)
+                sns.scatterplot(x=u[:, 0], y=u[:, 1], hue=clusters, palette=colours, s=8, linewidth=0.0, ax=ax)
+                ax.legend(prop={'size': 4}, bbox_to_anchor=(1.05, 0.98), borderaxespad=-1.5, labelspacing=1, frameon=False, handletextpad=0.1)
+                ax.set_title(f'min_cluster_size={cl_sizes[i]}, min_samples={min_samples[j]}', y=1.0, fontdict={'fontsize': 12})
+
+                # ax.legend(labels=colours_to_plot)
+
+        style_axs(axs.flat, labelpad=1)
+        plt.xticks([])
+        plt.yticks([])
+        fig.tight_layout()
+        plt.savefig(os.path.join(args['model_save_path'], 'UMAP_HDBSCAN_plots.pdf'), dpi=300)
 
     print('Exiting...')
