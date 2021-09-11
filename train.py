@@ -8,8 +8,6 @@
 import sys
 import os
 import argparse
-from multiprocessing.sharedctypes import Value
-from random import choices
 from pathlib import Path
 import torch
 
@@ -28,8 +26,8 @@ from tqdm.auto import tqdm
 import torch_geometric.transforms as T
 from sklearn.metrics.cluster import adjusted_rand_score as ARI
 from pathlib import Path
-from torch_geometric.data import Data, DataLoader
-from torch_geometric.utils import train_test_split_edges, to_undirected
+from torch_geometric.data import Data
+from torch_geometric.utils import to_undirected
 from torch.autograd import Variable
 from sklearn.preprocessing import MinMaxScaler
 from termcolor import colored
@@ -75,25 +73,11 @@ def prepare_training_data(args):
     sc.pp.highly_variable_genes(adata_hvg, n_top_genes=args['hvg'], inplace=True, flavor='seurat')
     sc.pp.highly_variable_genes(adata_khvg, n_top_genes=args['khvg'], inplace=True, flavor='seurat')
 
-    # X_hvg = np.array(adata[:, adata_hvg[adata_hvg['highly_variable']].index.values].X)
-    # X_khvg = np.array(adata[:, adata_khvg[adata_khvg['highly_variable']].index.values].X)
-
-    # adata_hvg = adata[:, adata_hvg[adata_hvg['highly_variable']].index.values]
-    # adata_khvg = adata[:, adata_khvg[adata_khvg['highly_variable']].index.values]
-
     adata_hvg = adata_hvg[:, adata_hvg.var['highly_variable'].values]
     adata_khvg = adata_khvg[:, adata_khvg.var['highly_variable'].values]
     X_hvg = adata_hvg.X
     X_khvg = adata_khvg.X
-    # X_hvg = adata_hvg[:, adata_hvg.var['highly_variable'].values].X
-    # X_khvg = adata_khvg[:, adata_khvg.var['highly_variable'].values].X
 
-    # if args['transpose_input']:
-    #     X_hvg = X_hvg.T
-    #     X_khvg = X_khvg.T
-    #     adata_hvg = adata_hvg.copy().transpose()
-    #     adata_khvg = adata_khvg.copy().transpose()
-    
     print(f'HVG adata shape: {adata_hvg.shape}')
     print(f'KHVG adata shape: {adata_khvg.shape}')
 
@@ -166,16 +150,6 @@ def prepare_graphs(adata_khvg, X_khvg, args):
         neighbors = np.full(distances.shape, fill_value=-1)
         neighbors[np.nonzero(distances)] = distances[np.nonzero(distances)]
 
-        # neighbors = distances[np.nonzero(distances)[0]].reshape(adata_khvg.shape[0], args['k'])
-        # print(neighbors.shape)
-        # from collections import Counter
-        # print(np.nonzero(distances)[0])
-        # c = Counter(np.nonzero(distances)[0])
-        # print(c)
-        # print({print(k) : v for k, v in dict(c).items() if v != 10})
-        # print(distances)
-        # print(np.nonzero(distances)[1][:25])
-        # neighbors = np.nonzero(distances)[1].reshape(np.nonzero(distances)[1].shape[0], args['k'])
     elif args['graph_type'] == 'KNN Faiss':
         print('Computing KNN Faiss graph ("{}" metric)...'.format(args['graph_metric']))
         distances, neighbors = knn_faiss(data_numpy=X_khvg, k=args['k'] + 1, metric=args['graph_metric'], use_gpu=args['faiss_gpu'])
@@ -193,9 +167,7 @@ def prepare_graphs(adata_khvg, X_khvg, args):
                 if args['graph_distance_cutoff_num_stds']:
                     distance = distances[i][j]
                     if distance < cutoff:
-                        # print(distance, cutoff)
                         if i != neighbors[i][j]:
-                            # print('appended')
                             edgelist.append(pair)
                 else:
                     if i != neighbors[i][j]:
@@ -238,8 +210,6 @@ def train(model, optimizer, train_data, loss, device, use_decoder_loss=False, co
 
     epoch_loss = 0.0
 
-    saves = []
-
     x, edge_index = train_data.x.to(torch.float).to(device), train_data.edge_index.to(torch.long).to(device)
 
     optimizer.zero_grad()
@@ -256,8 +226,6 @@ def train(model, optimizer, train_data, loss, device, use_decoder_loss=False, co
 
         loss = reconstruction_loss + mmd_loss
     else:
-        # num_features = len(train_loader.dataset)
-        num_features = train_data.x.shape[1]
         loss = reconstruction_loss + (1 / train_data.num_nodes) * model.kl_loss()
 
     decoder_loss = 0.0
@@ -278,13 +246,6 @@ def train(model, optimizer, train_data, loss, device, use_decoder_loss=False, co
 
     epoch_loss += loss.item()
     return epoch_loss, decoder_loss
-
-
-# def test(x, pos_edge_index, neg_edge_index):
-#     model.eval()
-#     with torch.no_grad():
-#         z, _ = model.encode(x.to(torch.float), train_pos_edge_index)
-#     return model.test(z, pos_edge_index, neg_edge_index)
 
 
 @torch.no_grad()
@@ -339,7 +300,6 @@ def setup(args):
 
     # Can set validation ratio
     try:
-        # data = train_test_split_edges(data_obj, val_ratio=args['val_split'], test_ratio=0)
         transform = T.RandomLinkSplit(num_val=args['val_split'], num_test=args['test_split'], is_undirected=True, add_negative_train_samples=False, split_labels=True)
         train_data, val_data, test_data = transform(data_obj)
     except IndexError as ie:
@@ -348,10 +308,7 @@ def setup(args):
         print('Might need to transpose input with the --transpose_input argument.')
         sys.exit(1)
 
-    # x, train_pos_edge_index = data.x.to(torch.double), data.train_pos_edge_index
-
     num_features = data_obj.num_features
-    # train_loader = DataLoader([Data(edge_index=train_pos_edge_index, x=x)], batch_size=1)
 
     if args['graph_convolution'] in ['GAT', 'GATv2']:
         num_heads = {}
@@ -386,7 +343,6 @@ def setup(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args['lr'])
     model = model.to(device)
 
-    # return model, optimizer, train_loader
     return model, optimizer, train_data, val_data, test_data
 
 
@@ -509,7 +465,6 @@ if __name__ == '__main__':
         print()
         print(colored('WARNING: --decoder_nn_dim1 provided but --use_linear_decoder is not set. Ignoring --decoder_nn_dim1.\n', 'yellow'))
 
-    # model, optimizer, train_loader = setup(args)
     model, optimizer, train_data, val_data, test_data = setup(args)
     if torch.cuda.is_available():
         print(f'CUDA available, using {torch.cuda.get_device_name(device)}.')
@@ -537,7 +492,6 @@ if __name__ == '__main__':
 
     # Train/val/test code
     for epoch in tqdm(range(1, args['epochs'] + 1)):
-        # epoch_loss, decoder_loss = train(model, optimizer, train_loader, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
         epoch_loss, decoder_loss = train(model, optimizer, train_data, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
         if args['use_linear_decoder']:
             print('Epoch {:03d} -- Total epoch loss: {:.4f} -- NN decoder epoch loss: {:.4f}'.format(epoch, epoch_loss, decoder_loss))
@@ -552,16 +506,10 @@ if __name__ == '__main__':
         auroc, ap = test(test_data)
         print('Test AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
 
-
-        # Uncomment if using validation
-        #     auc, ap = test(x.to(torch.float), data.val_pos_edge_index, data.val_neg_edge_index)
-        #     print('Epoch: {:03d} -- AUC: {:.4f} -- AP: {:.4f}'.format(epoch, auc, ap))
-
     # Save node embeddings
     model = model.eval()
     node_embeddings = []
 
-    # for batch_idx, batch in enumerate(train_loader):
     x, edge_index = train_data.x.to(torch.float).to(device), train_data.edge_index.to(torch.long).to(device)
     if args['graph_convolution'] in ['GAT', 'GATv2']:
         z_nodes, attn_w = model.encode(x, edge_index)
@@ -710,12 +658,9 @@ if __name__ == '__main__':
                 cluster_to_colour = dict(zip(clusters_set, colours))
                 colours_to_plot = [cluster_to_colour[clstr] for clstr in clusters]
                 
-                # ax.scatter(x=u[:, 0], y=u[:, 1], s=8, linewidths=0, c=colours_to_plot)
                 sns.scatterplot(x=u[:, 0], y=u[:, 1], hue=clusters, palette=colours, s=8, linewidth=0.0, ax=ax)
                 ax.legend(prop={'size': 4}, bbox_to_anchor=(1.05, 0.98), borderaxespad=-1.5, labelspacing=1, frameon=False, handletextpad=0.1)
                 ax.set_title(f'min_cluster_size={cl_sizes[i]}, min_samples={min_samples[j]}', y=1.0, fontdict={'fontsize': 12})
-
-                # ax.legend(labels=colours_to_plot)
 
         style_axs(axs.flat, labelpad=1)
         plt.xticks([])
