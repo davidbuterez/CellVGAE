@@ -10,192 +10,94 @@ CellVGAE uses the connectivity between cells (such as *k*-nearest neighbour grap
 
 ## Requirements
 
-The following packages are required to be able to run everything in this repository (included are the versions we used):
-
-```bash
-pandas==1.0.5
-torch_geometric==1.6.1
-seaborn==0.10.1
-matplotlib==3.2.2
-numpy==1.18.5
-hdbscan==0.8.26
-torch==1.6.0
-umap_learn==0.4.6
-graph_tool==2.11
-numpy==1.19.4
-scikit_learn==0.23.2
-umap==0.1.1
+1. Install the latest version of PyTorch, at the time of writing this is PyTorch 1.9.0 with CUDA 11.1. Instructions are on the [official website](https://pytorch.org/).
+2. Install PyTorch Geometric. At the time of writing, the latest version from the master branch must be installed. This is to avoid code that will be deprecated soon, but the official release via Anaconda should soon implement the required changes. Full instructions are at [https://github.com/rusty1s/pytorch_geometric#from-master](https://github.com/rusty1s/pytorch_geometric#from-master) and can be summarised as:
 ```
-The used CUDA toolkit version is 10.2. We also used CellVGAE successfully with PyTorch 1.7.0 and PyTorch Geometric 1.7.0 (CUDA 11.0). 
-
-[graph-tool](https://graph-tool.skewed.de/) is currently only available on Linux/Mac OS.
-
-The version of R we used is 4.0.2. The following libraries are required:
+pip install torch-scatter -f https://data.pyg.org/whl/torch-1.9.0+cu111.html
+pip install torch-sparse -f https://data.pyg.org/whl/torch-1.9.0+cu111.html
+pip install git+https://github.com/rusty1s/pytorch_geometric.git
+```
+3. Install Scanpy (currently at 1.8.1) following the [official instructions](https://scanpy.readthedocs.io/en/stable/installation.html).
+4. Install Faiss for CPUs or GPUs from the [official repository](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md). Currently, `faiss-gpu` is implemented for PyTorch 1.7.1 and CUDA 10.2, so if using more recent versions (recommended) it is best to use the CPU version (still extremely fast):
+```
+conda install -c pytorch faiss-cpu
+```
+5. Install the following additional packages if not already installed:
+```  
+pip install seaborn umap-learn hdbscan tqdm scikit-learn pandas termcolor
+```  
+6. (Optional) For the attention graph visualisations of Figure 6, `igraph` is required:
+```
+pip install python-igraph
+```  
+If using the R preprocessing code, we recommend installing the following:
 
 `Seurat 3`, `scran`, `SingleCellExperiment`. `scRNAseq`, `BiocSingular`, `igraph`, `dplyr` and `textshape`.
 
 ## Usage
 
-The `train.py` file can be invoked with the following options:
+The `train.py` file can be invoked with the arguments detailed below:
 
 ```
-train [-h] [--hvg_file HVG_FILE] [--graph_file GRAPH_FILE] [--num_hidden_layers NUM_HIDDEN_LAYERS] [--num_heads NUM_HEADS] [--hidden_dims [HIDDEN_DIMS [HIDDEN_DIMS ...]]] [--dropout [DROPOUT [DROPOUT ...]]] [--latent_dim LATENT_DIM] [--loss {kl,mmd}] [--lr LR] [--batch_size BATCH_SIZE] [--epochs EPOCHS] [--val_split VAL_SPLIT] [--node_out NODE_OUT] [--save_trained_model SAVE_TRAINED_MODEL]
+usage: train [-h] [--input_gene_expression_path INPUT_GENE_EXPRESSION_PATH] [--hvg HVG] [--khvg KHVG] [--graph_type {KNN Scanpy,KNN Faiss,PKNN}] [--k K]
+             [--graph_n_pcs GRAPH_N_PCS] [--graph_metric {euclidean,manhattan,cosine}] [--graph_distance_cutoff_num_stds GRAPH_DISTANCE_CUTOFF_NUM_STDS]
+             [--save_graph] [--raw_counts] [--faiss_gpu] [--hvg_file_path HVG_FILE_PATH] [--khvg_file_path KHVG_FILE_PATH]
+             [--graph_file_path GRAPH_FILE_PATH] [--graph_convolution {GAT,GATv2,GCN}] [--num_hidden_layers {2,3}]
+             [--num_heads [NUM_HEADS [NUM_HEADS ...]]] [--hidden_dims [HIDDEN_DIMS [HIDDEN_DIMS ...]]] [--dropout [DROPOUT [DROPOUT ...]]]
+             [--latent_dim LATENT_DIM] [--loss {kl,mmd}] [--lr LR] [--epochs EPOCHS] [--val_split VAL_SPLIT] [--test_split TEST_SPLIT] [--transpose_input]
+             [--use_linear_decoder] [--decoder_nn_dim1 DECODER_NN_DIM1] [--name NAME] --model_save_path MODEL_SAVE_PATH [--umap] [--hdbscan]
 
-Train CellVGAE
+Train CellVGAE.
 
 optional arguments:
   -h, --help            show this help message and exit
-  --hvg_file HVG_FILE   
-  						HVG file (log-normalised)
-  --graph_file GRAPH_FILE
-                        Graph specified as an edge list (one per line, separated by whitespace)
-  --num_hidden_layers NUM_HIDDEN_LAYERS
-                        Number of hidden layers (must be 2 or 3)
-  --num_heads NUM_HEADS
-                        Number of attention heads
+  --input_gene_expression_path INPUT_GENE_EXPRESSION_PATH
+                        Input gene expression file path.
+  --hvg HVG             Number of HVGs.
+  --khvg KHVG           Number of KHVGs.
+  --graph_type {KNN Scanpy,KNN Faiss,PKNN}
+                        Type of graph.
+  --k K                 K for KNN or Pearson (PKNN) graph.
+  --graph_n_pcs GRAPH_N_PCS
+                        Use this many Principal Components for the KNN (only Scanpy).
+  --graph_metric {euclidean,manhattan,cosine}
+  --graph_distance_cutoff_num_stds GRAPH_DISTANCE_CUTOFF_NUM_STDS
+                        Number of standard deviations to add to the mean of distances/correlation values. Can be negative.
+  --save_graph          Save the generated graph to the output path specified by --model_save_path.
+  --raw_counts          Enable preprocessing recipe for raw counts.
+  --faiss_gpu           Use Faiss on the GPU (only for KNN Faiss).
+  --hvg_file_path HVG_FILE_PATH
+                        HVG file if not using command line options to generate it.
+  --khvg_file_path KHVG_FILE_PATH
+                        KHVG file if not using command line options to generate it. Can be the same file as --hvg_file_path if HVG = KHVG.
+  --graph_file_path GRAPH_FILE_PATH
+                        Graph specified as an edge list (one edge per line, nodes separated by whitespace, not comma), if not using command line options
+                        to generate it.
+  --graph_convolution {GAT,GATv2,GCN}
+  --num_hidden_layers {2,3}
+                        Number of hidden layers (must be 2 or 3).
+  --num_heads [NUM_HEADS [NUM_HEADS ...]]
+                        Number of attention heads.
   --hidden_dims [HIDDEN_DIMS [HIDDEN_DIMS ...]]
-                        Output dimension for each hidden layer (only 2 or 3 layers allowed)
+                        Output dimension for each hidden layer (only 2 or 3 layers allowed).
   --dropout [DROPOUT [DROPOUT ...]]
-                        Dropout for each hidden layer (only 2 or 3 layers allowed)
+                        Dropout for each hidden layer (only 2 or 3 layers allowed).
   --latent_dim LATENT_DIM
-                        Latent dimension (output dimension for node embeddings)
-  --loss {kl,mmd}       
-  						Loss function (KL or MMD)
-  --lr LR               
-  						Learning rate for Adam
-  --batch_size BATCH_SIZE
-                        Batch size
-  --epochs EPOCHS       
-  						Number of training epochs
+                        Latent dimension (output dimension for node embeddings).
+  --loss {kl,mmd}       Loss function (KL or MMD).
+  --lr LR               Learning rate for Adam.
+  --epochs EPOCHS       Number of training epochs.
   --val_split VAL_SPLIT
-                        Validation split e.g. 0.1
-  --node_out NODE_OUT   
-  						Output file name and path for the computed node embeddings (saved in numpy .npy format)
-  --save_trained_model SAVE_TRAINED_MODEL
-                        Path to save PyTorch model
+                        Validation split e.g. 0.1.
+  --test_split TEST_SPLIT
+                        Test split e.g. 0.1.
+  --transpose_input     Specify if inputs should be transposed.
+  --use_linear_decoder  Turn on a neural network decoder, similar to traditional VAEs.
+  --decoder_nn_dim1 DECODER_NN_DIM1
+                        First hidden dimenson for the neural network decoder, if specified using --use_linear_decoder.
+  --name NAME           Name used for the written output files.
+  --model_save_path MODEL_SAVE_PATH
+                        Path to save PyTorch model and output files. Will create the entire path if necessary.
+  --umap                Compute and save the 2D UMAP embeddings of the output node features.
+  --hdbscan             Compute and save different HDBSCAN clusterings.
 ```
-
-
-
-We recommend running CellVGAE with the default architectural parameters of 2 hidden layers of dimension 128 and 0.2 dropout each and the number of latent dimension set to 50; we used this architecture for all datasets (only changing the number of attention heads):
-
-```bash
-python train.py --hvg_file HVG/Loh_HVG_500.csv --graph_file KNN/Loh_HVG_500_KNN_k5_d50.txt --num_hidden_layers 2 --num_heads 10
---hidden_dims 128 128 --dropout 0.2 0.2 --latent_dim 50 --lr 0.0001 --batch_size 64
-```
-
-The default settings are as above, and additionally the default number of epochs is set to 250, the validation split to 0, the loss to KL divergence (more memory efficient in the current implementation, for most of the experiments we have used the MMD). By default, the node embeddings are saved in a file `node_embs.npy` in the current directory, and the model to `model.pt` in the current directory.
-
-### Preprocessing steps
-
-1. Highly variable genes (HVG) selection is performed using the included`preprocessing/hvg_proprocessing.ipynb` notebook, where a count matrix (after quality control) is loaded and processed. User inputs are the project name and number of HVGs (250 or 500).
-2. Graph generation (either KNN or Pearson) is typically done on the HVGs matrix from the last step (other options are on the entire gene expression matrix, or on some HVG matrix of other dimension, e.g. using 1000 HVGs for graph generation but 250 HVGs for node features). User inputs are the number of neighbours *k* and optionally, for KNN, the number of dimensions of *PCA*.
-
-## Repository structure
-
-We provide the repository structure highlighting the directories and the Jupyter notebooks that accompany the data:
-
-```
-├──README.md
-├──requirements.txt
-├──train.py
-├──tree.txt
-├──figures
-│  ├──attention_visualisation
-│  │  ├──Darmanis
-│  │  ├──PBMC3k
-│  │  ├──attn_graph_darmanis.ipynb
-│  │  ├──attn_graph_pbmc.ipynb
-│  │  ├──attn_heatmap_darmanis.ipynb
-│  │  └──attn_heatmap_pbmc.ipynb
-|  |
-│  ├──baron4
-│  │  ├──CellVGAE
-│  │  ├──DiffVAE
-│  │  ├──SAM
-│  │  └──clusters.ipynb
-|  |
-│  ├──macrophages
-│  │  ├──CellVGAE
-│  │  ├──DiffVAE
-│  │  ├──SAM
-│  │  └──clusters.ipynb
-|  |
-│  ├──muraro
-│  │  ├──CellVGAE
-│  │  ├──DiffVAE
-│  │  ├──SAM
-│  │  └──clusters.ipynb
-|  |
-│  ├──pbmc3k
-│  │  ├──clustering
-│  │  │  └──pbmc3k_clusters.ipynb
-|  |  |
-│  │  └──expression
-│  │     └──pbmc3k_expression.ipynb
-|  |
-│  └──schisto
-│     ├──CellVGAE
-│     ├──DiffVAE
-│     ├──SAM
-│     ├──Seurat
-│     └──schisto_clusters.ipynb
-|
-├──misc
-│  ├──benchmark_sam.ipynb
-│  ├──clean_seger.ipynb
-│  ├──clean_wang.ipynb
-│  └──curate_baron.ipynb
-|
-├──models
-│  ├──CellVGAE_Encoder.py
-│  ├──CellVGAE.py
-│  └──mmd.py
-|
-├──preprocessing
-│  ├──generate_knn.ipynb
-│  ├──generate_pearson_graph.ipynb
-│  └──hvg_proprocessing.ipynb
-|
-├──saved_embeddings
-│  ├──inspect_saved.ipynb
-│  ├──baron1
-│  ├──baron2
-│  ├──baron3
-│  ├──baron4
-│  ├──darmanis
-│  ├──loh
-│  ├──muraro
-│  ├──segerstolpe
-│  └──wang
-|
-├──top_genes
-│  ├──schisto_example
-│  │  ├──CellVGAE
-│  │  ├──HVG
-│  │  └──layer_weights
-|  |
-│  └──top_genes.ipynb
-|
-└──utils
-   ├──attn_graph.py
-   ├──cluster.py
-   └──top_genes.py
-```
-
-Brief explanations for each subdirectory:
-
-- `models` includes the model definition and logic for CellVGAE
-- `utils` contains various helper functions used throughout the project
-- `saved_embeddings` includes saved node embeddings, 2D UMAP representations and clusters for the 9 benchmarks and a notebook for visualisation
-- `preprocessing` has small notebooks used to generate the inputs to CellVGAE, i.e. the highly variable genes files and the graphs
-- `top_genes` gives an example notebook on how to identify the high-weight genes, corresponds to Section 5.1.2 *Finding marker genes*
-- `misc` contains code to curate or clean some of the datasets (actual data not included in the repository because of size)
-- `figures` includes the code necessary to generate all the figures and the code for the respective analyses:
-  - `attention_visualisation` corresponds to Section 5.4 *Interpretability*
-  - `baron4` corresponds to Appendix D *Clustering on the Baron4 dataset*
-  - `macrophages` corresponds to Appendix A *The macrophages dataset*
-  - `muraro` corresponds to Section 5.3.1 *Results*
-  - `pbmc3k/clustering` corresponds to Section 5.2.1 *Clustering performance*
-  - `pbmc3k/expression` corresponds to Section 5.2.2 *Visualising gene expression*
-  - `schisto`  corresponds to Section 5.1 *The Schistosoma mansoni dataset*
