@@ -11,7 +11,6 @@ import argparse
 from multiprocessing.sharedctypes import Value
 from random import choices
 from pathlib import Path
-from tkinter import E, N
 import torch
 
 import seaborn as sns
@@ -26,10 +25,12 @@ import umap
 import hdbscan
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
+import torch_geometric.transforms as T
 from sklearn.metrics.cluster import adjusted_rand_score as ARI
 from pathlib import Path
 from torch_geometric.data import Data, DataLoader
 from torch_geometric.utils import train_test_split_edges, to_undirected
+from torch.autograd import Variable
 from sklearn.preprocessing import MinMaxScaler
 from termcolor import colored
 
@@ -124,6 +125,7 @@ def knn_faiss(data_numpy, k, metric='euclidean', use_gpu=False):
     
     if metric == 'euclidean':
         index = faiss.IndexFlatL2(data_numpy.shape[1])
+
     elif metric == 'manhattan':
         index = faiss.IndexFlat(data_numpy.shape[1], faiss.METRIC_L1)
     elif metric == 'cosine':
@@ -231,58 +233,68 @@ def prepare_graphs(adata_khvg, X_khvg, args):
     return edgelist
 
 
-def train(model, optimizer, train_loader, loss, device, use_decoder_loss=False, conv_type='GAT'):
+def train(model, optimizer, train_data, loss, device, use_decoder_loss=False, conv_type='GAT'):
     model = model.train()
 
     epoch_loss = 0.0
 
     saves = []
 
-    for batch_idx, batch in enumerate(train_loader):
-        x, edge_index = batch.x.to(torch.float).to(device), batch.edge_index.to(torch.long).to(device)
+    x, edge_index = train_data.x.to(torch.float).to(device), train_data.edge_index.to(torch.long).to(device)
 
-        optimizer.zero_grad()
-        
-        if conv_type in ['GAT', 'GATv2']:
-            z, _ = model.encode(x, edge_index)
-        else:
-            z = model.encode(x, edge_index)
-        reconstruction_loss = model.recon_loss(z, edge_index)
+    optimizer.zero_grad()
+    
+    if conv_type in ['GAT', 'GATv2']:
+        z, _ = model.encode(x, edge_index)
+    else:
+        z = model.encode(x, edge_index)
+    reconstruction_loss = model.recon_loss(z, train_data.pos_edge_label_index)
 
-        if loss == 'mmd':
-            true_samples = Variable(torch.randn(x.shape[0], LATENT_DIM), requires_grad=False)
-            mmd_loss = mmd.compute_mmd(true_samples.to(device), z)
+    if loss == 'mmd':
+        true_samples = Variable(torch.randn(x.shape[0], args['latent_dim']), requires_grad=False)
+        mmd_loss = mmd.compute_mmd(true_samples.to(device), z)
 
-            loss = reconstruction_loss + mmd_loss
-        else:
-            num_features = len(train_loader.dataset)
-            loss = reconstruction_loss + (1 / num_features) * model.kl_loss()
+        loss = reconstruction_loss + mmd_loss
+    else:
+        # num_features = len(train_loader.dataset)
+        num_features = train_data.x.shape[1]
+        loss = reconstruction_loss + (1 / train_data.num_nodes) * model.kl_loss()
 
-        decoder_loss = 0.0
-        if use_decoder_loss:
-            try:
-                reconstructed_features = model.decoder_nn(z)
-            except AttributeError as ae:
-                print()
-                print(colored('Exception: ' + str(ae), 'red'))
-                print('Need to provide the first hidden dimension for the decoder with --decoder_nn_dim1.')
-                sys.exit(1)
-                
-            decoder_loss = torch.nn.functional.mse_loss(reconstructed_features, x) * 10
-            loss += decoder_loss
+    decoder_loss = 0.0
+    if use_decoder_loss:
+        try:
+            reconstructed_features = model.decoder_nn(z)
+        except AttributeError as ae:
+            print()
+            print(colored('Exception: ' + str(ae), 'red'))
+            print('Need to provide the first hidden dimension for the decoder with --decoder_nn_dim1.')
+            sys.exit(1)
+            
+        decoder_loss = torch.nn.functional.mse_loss(reconstructed_features, x) * 10
+        loss += decoder_loss
 
-        loss.backward()
-        optimizer.step()
+    loss.backward()
+    optimizer.step()
 
-        epoch_loss += loss.item()
+    epoch_loss += loss.item()
     return epoch_loss, decoder_loss
 
 
-def test(x, pos_edge_index, neg_edge_index):
+# def test(x, pos_edge_index, neg_edge_index):
+#     model.eval()
+#     with torch.no_grad():
+#         z, _ = model.encode(x.to(torch.float), train_pos_edge_index)
+#     return model.test(z, pos_edge_index, neg_edge_index)
+
+
+@torch.no_grad()
+def test(data):
     model.eval()
-    with torch.no_grad():
-        z, _ = model.encode(x.to(torch.float), train_pos_edge_index)
-    return model.test(z, pos_edge_index, neg_edge_index)
+    if args['graph_convolution'] in ['GAT', 'GATv2']:
+        z, _ = model.encode(data.x.to(torch.float).to(device), data.edge_index.to(torch.long).to(device))
+    else:
+        z = model.encode(data.x.to(torch.float).to(device), data.edge_index.to(torch.long).to(device))
+    return model.test(z, data.pos_edge_label_index.to(torch.long).to(device), data.neg_edge_label_index.to(torch.long).to(device))  
 
 
 def setup(args):
@@ -327,17 +339,19 @@ def setup(args):
 
     # Can set validation ratio
     try:
-        data = train_test_split_edges(data_obj, val_ratio=args['val_split'], test_ratio=0)
+        # data = train_test_split_edges(data_obj, val_ratio=args['val_split'], test_ratio=0)
+        transform = T.RandomLinkSplit(num_val=args['val_split'], num_test=args['test_split'], is_undirected=True, add_negative_train_samples=False, split_labels=True)
+        train_data, val_data, test_data = transform(data_obj)
     except IndexError as ie:
         print()
         print(colored('Exception: ' + str(ie), 'red'))
         print('Might need to transpose input with the --transpose_input argument.')
         sys.exit(1)
 
-    x, train_pos_edge_index = data.x.to(torch.double), data.train_pos_edge_index
+    # x, train_pos_edge_index = data.x.to(torch.double), data.train_pos_edge_index
 
     num_features = data_obj.num_features
-    train_loader = DataLoader([Data(edge_index=train_pos_edge_index, x=x)], batch_size=1)
+    # train_loader = DataLoader([Data(edge_index=train_pos_edge_index, x=x)], batch_size=1)
 
     if args['graph_convolution'] in ['GAT', 'GATv2']:
         num_heads = {}
@@ -372,7 +386,8 @@ def setup(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args['lr'])
     model = model.to(device)
 
-    return model, optimizer, train_loader
+    # return model, optimizer, train_loader
+    return model, optimizer, train_data, val_data, test_data
 
 
 def _get_filepath(args, number_or_name, edge_or_weights):
@@ -407,13 +422,14 @@ if __name__ == '__main__':
     parser.add_argument('--lr', help='Learning rate for Adam.', default=0.0001, type=float)
     parser.add_argument('--epochs', help='Number of training epochs.', default=50, type=int)
     parser.add_argument('--val_split', help='Validation split e.g. 0.1', default=0.0, type=float)
+    parser.add_argument('--test_split', help='Test split e.g. 0.1', default=0.0, type=float)
     parser.add_argument('--transpose_input', action='store_true', default=False, help='Specify if inputs should be transposed.')
     parser.add_argument('--use_linear_decoder', action='store_true', default=False, help='Turn on a neural network decoder, similar to traditional VAEs.')
     parser.add_argument('--decoder_nn_dim1', help='First hidden dimenson for the neural network decoder, if specified using --use_linear_decoder.', type=int)
     parser.add_argument('--name', help='Name used for the written output files.', type=str)
     parser.add_argument('--model_save_path', required=True, help='Path to save PyTorch model and output files. Will create the entire path if necessary.', type=str)
-    parser.add_argument('--umap', action='store_true', default=True, help='Compute and save the 2D UMAP embeddings of the output node features.')
-    parser.add_argument('--hdbscan', action='store_true', default=True, help='Compute and save different HDBSCAN clusterings.')
+    parser.add_argument('--umap', action='store_true', default=False, help='Compute and save the 2D UMAP embeddings of the output node features.')
+    parser.add_argument('--hdbscan', action='store_true', default=False, help='Compute and save different HDBSCAN clusterings.')
 
     args = parser.parse_args()
 
@@ -430,6 +446,7 @@ if __name__ == '__main__':
     assert args['epochs'] > 0, 'Number of epochs must be greateer than 0.'
     assert args['lr'] > 0, 'Learning rate must be greateer than 0.'
     assert args['val_split'] >= 0, 'Negative values for the validation split are not allowed.'
+    assert args['test_split'] >= 0, 'Negative values for the test split are not allowed.'
 
     if args['decoder_nn_dim1']:
         assert args['decoder_nn_dim1'] > 0, 'Number of latent dimensions must be greateer than 0.'
@@ -492,8 +509,8 @@ if __name__ == '__main__':
         print()
         print(colored('WARNING: --decoder_nn_dim1 provided but --use_linear_decoder is not set. Ignoring --decoder_nn_dim1.\n', 'yellow'))
 
-    # model, optimizer, train_loader, data_list = setup(args)
-    model, optimizer, train_loader = setup(args)
+    # model, optimizer, train_loader = setup(args)
+    model, optimizer, train_data, val_data, test_data = setup(args)
     if torch.cuda.is_available():
         print(f'CUDA available, using {torch.cuda.get_device_name(device)}.')
     print('Neural model details: \n')
@@ -502,17 +519,39 @@ if __name__ == '__main__':
 
     print(f'Using {args["latent_dim"]} latent dimensions.')
     if args['use_linear_decoder']:
-        print('Using linear feature decoder.\n')
+        print('Using linear feature decoder.')
     else:
-        print('No feature decoder used.\n')
+        print('No feature decoder used.')
+    if args['loss'] == 'kl':
+        print('Using KL loss.')
+    else:
+        print('Using MMD loss.')
 
-    # Train code
+    print(f'Number of train edges {train_data.edge_index.shape[1]}.\n')
+
+    if args['val_split']:
+        print(f'Using validation split of {args["val_split"]}, number of validation edges: {val_data.pos_edge_label_index.shape[1]}.')
+
+    if args['test_split']:
+        print(f'Using test split of {args["test_split"]}, number of test edges: {test_data.pos_edge_label_index.shape[1]}.')
+
+    # Train/val/test code
     for epoch in tqdm(range(1, args['epochs'] + 1)):
-        epoch_loss, decoder_loss = train(model, optimizer, train_loader, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
+        # epoch_loss, decoder_loss = train(model, optimizer, train_loader, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
+        epoch_loss, decoder_loss = train(model, optimizer, train_data, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
         if args['use_linear_decoder']:
             print('Epoch {:03d} -- Total epoch loss: {:.4f} -- NN decoder epoch loss: {:.4f}'.format(epoch, epoch_loss, decoder_loss))
         else:
             print('Epoch {:03d} -- Total epoch loss: {:.4f}'.format(epoch, epoch_loss))
+
+        if args['val_split']:
+            auroc, ap = test(val_data)
+            print('Validation AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
+
+    if args['test_split']:
+        auroc, ap = test(test_data)
+        print('Test AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
+
 
         # Uncomment if using validation
         #     auc, ap = test(x.to(torch.float), data.val_pos_edge_index, data.val_neg_edge_index)
@@ -522,13 +561,13 @@ if __name__ == '__main__':
     model = model.eval()
     node_embeddings = []
 
-    for batch_idx, batch in enumerate(train_loader):
-        x, edge_index = batch.x.to(torch.float).to(device), batch.edge_index.to(torch.long).to(device)
-        if args['graph_convolution'] in ['GAT', 'GATv2']:
-            z_nodes, attn_w = model.encode(x, edge_index)
-        else:
-            z_nodes = model.encode(x, edge_index)
-        node_embeddings.append(z_nodes.cpu().detach().numpy())
+    # for batch_idx, batch in enumerate(train_loader):
+    x, edge_index = train_data.x.to(torch.float).to(device), train_data.edge_index.to(torch.long).to(device)
+    if args['graph_convolution'] in ['GAT', 'GATv2']:
+        z_nodes, attn_w = model.encode(x, edge_index)
+    else:
+        z_nodes = model.encode(x, edge_index)
+    node_embeddings.append(z_nodes.cpu().detach().numpy())
 
     node_embeddings = np.array(node_embeddings)
     node_embeddings = node_embeddings.squeeze()
