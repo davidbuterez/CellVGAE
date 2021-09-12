@@ -1,0 +1,26 @@
+# GAT, save computed graph
+python train.py --input_gene_expression_path "/mnt/c/Projects/Myeloid/paul15_myeloid_scanpy.h5ad" --hvg 1000 --khvg 250 --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out"
+
+# GATv2, save computed graph
+python train.py --input_gene_expression_path "/mnt/c/Projects/Myeloid/paul15_myeloid_scanpy.h5ad" --hvg 1000 --khvg 250 --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GATv2" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out"
+
+# GCN, save computed graph
+python train.py --input_gene_expression_path "/mnt/c/Projects/Myeloid/paul15_myeloid_scanpy.h5ad" --hvg 1000 --khvg 250 --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GCN" --num_hidden_layers 2 --hidden_dims 128 128 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out"
+
+# GAT, save computed graph, UMAP and HDBSCAN
+python train.py --input_gene_expression_path "/mnt/c/Projects/Myeloid/paul15_myeloid_scanpy.h5ad" --hvg 1000 --khvg 250 --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out" --umap --hdbscan
+
+# GAT, Faiss KNN graph, save computed graph, UMAP and HDBSCAN
+python train.py --input_gene_expression_path "/mnt/c/Projects/Myeloid/paul15_myeloid_scanpy.h5ad" --hvg 1000 --khvg 250 --graph_type "KNN Faiss" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out" --umap --hdbscan
+
+# GAT, PKNN graph, save computed graph, UMAP and HDBSCAN
+python train.py --input_gene_expression_path "/mnt/c/Projects/Myeloid/paul15_myeloid_scanpy.h5ad" --hvg 1000 --khvg 250 --graph_type "PKNN" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out" --umap --hdbscan
+
+# GAT, dataset that needs --raw_counts and --transpose_input
+python train.py --input_gene_expression_path "/mnt/c/Projects/CellVGAE_July_updates/data/baron1/raw/Baron1_raw_counts.csv" --raw_counts --transpose_input --hvg 1000 --khvg 250 --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out" --umap --hdbscan
+
+# GAT, custom user provided HVG, KHVG and graph files
+python train.py --hvg_file_path "/mnt/c/Projects/CellVGAE_July_updates/data/baron1/hvg/hvg1000.csv" --khvg_file_path "/mnt/c/Projects/CellVGAE_July_updates/data/baron1/hvg/hvg500.csv" --graph_file_path "/mnt/c/Projects/CellVGAE_July_updates/data/baron1/old_hvg_new_graphs/Baron1_Pearson_K10_HVG1000.txt" --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --transpose_input --model_save_path "model_saved_out"
+
+# GAT, custom user provided HVG, KHVG and command-line generated graph (not provided)
+python train.py --hvg_file_path "/mnt/c/Projects/CellVGAE_July_updates/data/baron1/hvg/hvg1000.csv" --khvg_file_path "/mnt/c/Projects/CellVGAE_July_updates/data/baron1/hvg/hvg500.csv" --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --transpose_input --model_save_path "model_saved_out"

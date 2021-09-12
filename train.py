@@ -35,6 +35,18 @@ from termcolor import colored
 from models import CellVGAE, CellVGAE_Encoder
 from models import mmd
 
+def user_prompt() -> bool:
+    # Credit for function: https://stackoverflow.com/a/50216611
+    """ Prompt the yes/no-*question* to the user. """
+    from distutils.util import strtobool
+
+    while True:
+        user_input = input("[y/n]: ")
+        try:
+            return bool(strtobool(user_input))
+        except ValueError:
+            print("Please use y/n or yes/no.\n")
+
 
 def preprocess_raw_counts(adata):
     sc.pp.normalize_total(adata, target_sum=1e4)
@@ -54,6 +66,12 @@ def prepare_training_data(args):
     adata = load_input_file(args['input_gene_expression_path'])
     print(f'Original data shape: {adata.shape}')
 
+    if (np.abs(adata.shape[0] - 20000) < 5000) and (adata.shape[0] / adata.shape[1] > 0.4) and not args['transpose_input']:
+        print(colored('WARNING: --transpose_input not provided but input data might have genes in the fist dimension. Are you sure you want to continue?', 'yellow'))
+        answer = user_prompt()
+        if not answer:
+            sys.exit(0)
+
     if args['transpose_input']:
         print(f'Transposing input to {adata.shape[::-1]}...')
         adata = adata.copy().transpose()
@@ -61,7 +79,6 @@ def prepare_training_data(args):
     adata_pp = adata.copy()
     if args['raw_counts']:
         print('Applying raw counts preprocessing...')
-        # sc.pp.recipe_seurat(adata_pp, log=True, copy=False)
         preprocess_raw_counts(adata_pp)
     else:
         print('Applying log-normalisation...')
@@ -156,6 +173,9 @@ def prepare_graphs(adata_khvg, X_khvg, args):
     elif args['graph_type'] == 'PKNN':
         print('Computing PKNN graph...')
         distances, neighbors = correlation(data_numpy=X_khvg, k=args['k'] + 1)
+    # else:
+    #     print(colored('Graph generation enabled but graph type not provided. Exiting...', 'red'))
+    #     sys.exit(1)
 
     if args['graph_distance_cutoff_num_stds']:
         cutoff = np.mean(np.nonzero(distances), axis=None) + float(args['graph_distance_cutoff_num_stds']) * np.std(np.nonzero(distances), axis=None)
@@ -178,7 +198,7 @@ def prepare_graphs(adata_khvg, X_khvg, args):
     if args['save_graph']:
         Path(args['model_save_path']).mkdir(parents=True, exist_ok=True)
 
-        num_hvg = X_khvg.shape[1] if args['transpose_input'] else X_khvg.shape[0]
+        num_hvg = X_khvg.shape[1]
         k_file = args['k']
         if args['graph_type'] == 'KNN Scanpy':
             graph_name = 'Scanpy'
@@ -285,7 +305,7 @@ def setup(args):
     else:
         edgelist = load_separate_graph_edgelist(args['graph_file_path'])
 
-    num_nodes = X_hvg.shape[0] if args['transpose_input'] else X_hvg.shape[1]
+    num_nodes = X_hvg.shape[0]
     print(f'Number of nodes in graph: {num_nodes}.')
     edge_index = np.array(edgelist).astype(int).T
     edge_index = to_undirected(torch.from_numpy(edge_index).to(torch.long), num_nodes)
@@ -438,6 +458,12 @@ if __name__ == '__main__':
     if (args['graph_file_path'] is not None) and (args['save_graph']):
         raise ValueError('Cannot use custom graph file when --save_graph is specified.')
 
+    if (not args['graph_file_path']) and (not args['k']):
+        raise ValueError('Graph generation enabled but --k not specified.')
+
+    if (not args['graph_file_path']) and (not args['graph_type']):
+        raise ValueError('Graph generation enabled but --graph_type not specified.')
+
     if (conv_type == 'GCN') and (num_heads is not None or dropout is not None):
         raise ValueError('GCN convolution not available with --num_heads or --dropout.')
 
@@ -466,7 +492,7 @@ if __name__ == '__main__':
 
     model, optimizer, train_data, val_data, test_data = setup(args)
     if torch.cuda.is_available():
-        print(f'CUDA available, using {torch.cuda.get_device_name(device)}.')
+        print(f'\nCUDA available, using {torch.cuda.get_device_name(device)}.')
     print('Neural model details: \n')
     print(model)
     print()
@@ -566,7 +592,8 @@ if __name__ == '__main__':
 
     # UMAP
     if args['umap']:
-        umap_output_path = os.path.join(args['model_save_path'], '2D_UMAP_embeddings.npy')
+        filename = args['name'] + '_' if args['name'] else ''
+        umap_output_path = os.path.join(args['model_save_path'], filename + '2D_UMAP_embeddings.npy')
         print(f'Computing UMAP representation and saving to {umap_output_path}...')
         umap_reducer = umap.UMAP()
         u = umap_reducer.fit_transform(node_embeddings)
@@ -594,7 +621,9 @@ if __name__ == '__main__':
     
     # Save plots
     if args['umap']:
-        print('Saving UMAP plot...')
+        filename = args['name'] + '_' if args['name'] else ''
+        umap_save_path = os.path.join(args['model_save_path'], filename + 'UMAP_plot.pdf')
+        print(f'Saving UMAP plot to {umap_save_path}...')
 
         c1 = '7dba84-81171B-f4743b-073b3a-fe4a49'.split('-')
         c2 = '473198-FFA552-FAA916-16DB65-CBEF43'.split('-')
@@ -631,10 +660,12 @@ if __name__ == '__main__':
         plt.xticks([])
         plt.yticks([])
         fig.tight_layout()
-        plt.savefig(os.path.join(args['model_save_path'], 'UMAP_plot.pdf'), dpi=300)
+        plt.savefig(umap_save_path, dpi=300)
 
     if args['hdbscan']:
-        print('Saving UMAP plots with HDBSCAN clusters...')
+        filename = args['name'] + '_' if args['name'] else ''
+        hdbscan_plot_save_path = os.path.join(args['model_save_path'], filename + 'UMAP_HDBSCAN_plots.pdf')
+        print(f'Saving UMAP plots with HDBSCAN clusters to {hdbscan_plot_save_path}...')
         fig, axs = plt.subplots(4, 4, figsize=(18, 18))
         plt.tight_layout(w_pad=2, h_pad=1.5)
 
@@ -659,13 +690,13 @@ if __name__ == '__main__':
                 colours_to_plot = [cluster_to_colour[clstr] for clstr in clusters]
                 
                 sns.scatterplot(x=u[:, 0], y=u[:, 1], hue=clusters, palette=colours, s=8, linewidth=0.0, ax=ax)
-                ax.legend(prop={'size': 4}, bbox_to_anchor=(1.05, 0.98), borderaxespad=-1.5, labelspacing=1, frameon=False, handletextpad=0.1)
+                ax.legend(prop={'size': 3}, bbox_to_anchor=(1.05, 0.98), borderaxespad=-1.5, labelspacing=1, frameon=False, handletextpad=0.75)
                 ax.set_title(f'min_cluster_size={cl_sizes[i]}, min_samples={min_samples[j]}', y=1.0, fontdict={'fontsize': 12})
 
         style_axs(axs.flat, labelpad=1)
         plt.xticks([])
         plt.yticks([])
         fig.tight_layout()
-        plt.savefig(os.path.join(args['model_save_path'], 'UMAP_HDBSCAN_plots.pdf'), dpi=300)
+        plt.savefig(hdbscan_plot_save_path, dpi=300)
 
     print('Exiting...')
