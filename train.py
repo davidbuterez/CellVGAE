@@ -370,9 +370,9 @@ if __name__ == '__main__':
     parser.add_argument('--graph_file_path', help='Graph specified as an edge list (one edge per line, nodes separated by whitespace, not comma), if not using command line options to generate it.')
     parser.add_argument('--graph_convolution', choices=['GAT', 'GATv2', 'GCN'], default='GAT')
     parser.add_argument('--num_hidden_layers', help='Number of hidden layers (must be 2 or 3).', choices=[2, 3], type=int)
-    parser.add_argument('--num_heads', help='Number of attention heads.', type=int, nargs='*')
-    parser.add_argument('--hidden_dims', help='Output dimension for each hidden layer (only 2 or 3 layers allowed).', type=int, nargs='*', default=[128, 128])
-    parser.add_argument('--dropout', help='Dropout for each hidden layer (only 2 or 3 layers allowed).', type=float, nargs='*')
+    parser.add_argument('--num_heads', help='Number of attention heads for each layer. Input is a list that must match the total number of layers = num_hidden_layers + 2 in length.', type=int, nargs='*')
+    parser.add_argument('--hidden_dims', help='Output dimension for each hidden layer. Input is a list that matches --num_hidden_layers in length.', type=int, nargs='*', default=[128, 128])
+    parser.add_argument('--dropout', help='Dropout for each layer. Input is a list that must match the total number of layers = num_hidden_layers + 2 in length.', type=float, nargs='*')
     parser.add_argument('--latent_dim', help='Latent dimension (output dimension for node embeddings).', default=50, type=int)
     parser.add_argument('--loss', help='Loss function (KL or MMD).', choices=['kl', 'mmd'], default='kl')
     parser.add_argument('--lr', help='Learning rate for Adam.', default=0.0001, type=float)
@@ -436,7 +436,6 @@ if __name__ == '__main__':
         raise ValueError('Cannot use custom graph file when --k is specified.')
 
     if (args['graph_file_path'] is not None) and (args['save_graph']):
-        print(args['save_graph'])
         raise ValueError('Cannot use custom graph file when --save_graph is specified.')
 
     if (conv_type == 'GCN') and (num_heads is not None or dropout is not None):
@@ -566,30 +565,31 @@ if __name__ == '__main__':
         torch.save(attention_weights, sigma_attn_w_filepath)
 
     # UMAP
-    print('Computing UMAP representation...')
     if args['umap']:
+        umap_output_path = os.path.join(args['model_save_path'], '2D_UMAP_embeddings.npy')
+        print(f'Computing UMAP representation and saving to {umap_output_path}...')
         umap_reducer = umap.UMAP()
         u = umap_reducer.fit_transform(node_embeddings)
-        np.save(os.path.join(args['model_save_path'], '2D_UMAP_embeddings.npy'), u)
+        np.save(umap_output_path, u)
 
     # HDBSCAN
-    print('Computing HDBSCAN clusterings...')
-    cl_sizes = [10, 25, 50, 100]
-    min_samples = [5, 10, 25, 50]
-
-    hdbscan_dict = {}
     if args['hdbscan']:
+        hdbscan_save_dir = os.path.join(args['model_save_path'], 'hdbscan_clusters/')
+        print(f'Computing HDBSCAN clusterings and saving to {hdbscan_save_dir}...')
+        cl_sizes = [10, 25, 50, 100]
+        min_samples = [5, 10, 25, 50]
+
+        hdbscan_dict = {}
         for cl_size in cl_sizes:
             for min_sample in min_samples:
                 clusterer = hdbscan.HDBSCAN(min_cluster_size=cl_size, min_samples=min_sample)
                 clusterer.fit(u)
                 hdbscan_dict[(cl_size, min_sample)] = clusterer.labels_
-    hdbscan_save_dir = os.path.join(args['model_save_path'], 'hdbscan_clusters')
-    Path(hdbscan_save_dir).mkdir(parents=True, exist_ok=True)
+        Path(hdbscan_save_dir).mkdir(parents=True, exist_ok=True)
 
-    for k, clusters in hdbscan_dict.items():
-        cl_size, min_sample = k
-        np.save(os.path.join(hdbscan_save_dir, f'hdbscan-clusters-min_cluster_size={cl_size}-min_samples={min_sample}.npy'), clusters)
+        for k, clusters in hdbscan_dict.items():
+            cl_size, min_sample = k
+            np.save(os.path.join(hdbscan_save_dir, f'hdbscan-clusters-min_cluster_size={cl_size}-min_samples={min_sample}.npy'), clusters)
 
     
     # Save plots
