@@ -173,9 +173,6 @@ def prepare_graphs(adata_khvg, X_khvg, args):
     elif args['graph_type'] == 'PKNN':
         print('Computing PKNN graph...')
         distances, neighbors = correlation(data_numpy=X_khvg, k=args['k'] + 1)
-    # else:
-    #     print(colored('Graph generation enabled but graph type not provided. Exiting...', 'red'))
-    #     sys.exit(1)
 
     if args['graph_distance_cutoff_num_stds']:
         cutoff = np.mean(np.nonzero(distances), axis=None) + float(args['graph_distance_cutoff_num_stds']) * np.std(np.nonzero(distances), axis=None)

@@ -1,14 +1,11 @@
 import torch
-import hdbscan
-import umap
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from collections import defaultdict, Counter
+from collections import defaultdict
 
 def mean_of_attention_heads(matrix, out_dim):
     chunks = torch.split(matrix, out_dim, dim=1)
@@ -56,9 +53,6 @@ def latent_dim_participation_in_clusters(latent_data, labels):
     
     for ax in g.axes.flatten():
         ax.tick_params(labelbottom=True)
-                      
-#     plt.savefig('Saves/ARI7075/weights_analysis/latent_dims.pdf')
-#     plt.show()
 
     return latent_diff
 

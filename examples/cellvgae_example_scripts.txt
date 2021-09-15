@@ -24,3 +24,6 @@ python train.py --hvg_file_path "data/baron1/hvg/hvg1000.csv" --khvg_file_path "
 
 # GAT, custom user provided HVG, KHVG and command-line generated graph (not provided)
 python train.py --hvg_file_path "data/baron1/hvg/hvg1000.csv" --khvg_file_path "data/baron1/hvg/hvg500.csv" --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --transpose_input --model_save_path "model_saved_out"
+
+# GAT, save computed graph, add neural network decoder
+python train.py --input_gene_expression_path "/mnt/c/Projects/Myeloid/paul15_myeloid_scanpy.h5ad" --hvg 1000 --khvg 250 --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out" --use_linear_decoder --decoder_nn_dim1 128
