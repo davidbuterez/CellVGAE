@@ -10,41 +10,61 @@ CellVGAE uses the connectivity between cells (such as *k*-nearest neighbour grap
 
 ## Requirements
 
-1. Install the latest version of PyTorch, at the time of writing this is PyTorch 1.9.0 with CUDA 11.1. Instructions are on the [official website](https://pytorch.org/).
-2. Install PyTorch Geometric. At the time of writing, the latest version from the master branch must be installed. This is to avoid code that will be deprecated soon, but the official release via Anaconda should soon implement the required changes. Full instructions are at [https://github.com/rusty1s/pytorch_geometric#from-master](https://github.com/rusty1s/pytorch_geometric#from-master) and can be summarised as:
-```
-pip install torch-scatter -f https://data.pyg.org/whl/torch-1.9.0+cu111.html
-pip install torch-sparse -f https://data.pyg.org/whl/torch-1.9.0+cu111.html
-pip install git+https://github.com/rusty1s/pytorch_geometric.git
-```
-3. Install Scanpy (currently at 1.8.1) following the [official instructions](https://scanpy.readthedocs.io/en/stable/installation.html).
-4. Install Faiss for CPUs or GPUs from the [official repository](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md). Currently, `faiss-gpu` is implemented for PyTorch 1.7.1 and CUDA 10.2, so if using more recent versions (recommended) it is best to use the CPU version (still extremely fast):
-```
-conda install -c pytorch faiss-cpu
-```
-5. Install the following additional packages if not already installed:
-```  
-pip install seaborn umap-learn hdbscan tqdm scikit-learn pandas termcolor
-```
-6. (Optional) For the attention graph visualisations of Figure 6, `igraph` is required:
-```
-pip install python-igraph
-```
+Installing CellVGAE with pip will attempt to install PyTorch, PyTorch Geometric and Faiss, however it is recommended that the appropriate GPU/CPU versions are installed manually beforehand. For Linux:
+
+1. Install PyTorch GPU: 
+
+   ```conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch -c nvidia```
+
+   or PyTorch CPU:  
+
+   ```conda install pytorch torchvision torchaudio cpuonly -c pytorch```
+
+   
+   
+2. Install PyTorch Geometric:  
+
+   `conda install pyg -c pyg -c conda-forge`
+   
+   
+
+3. Install Faiss CPU:  
+
+   `conda install -c pytorch faiss-cpu`
+   
+   A GPU version of Faiss for CUDA 11.1 is not yet available.
+
+   
+
+4. Install CellVGAE with pip:
+
+   `pip install cellvgae --pre`
+   
+   
+
+5. (Optional) For the attention graph visualisations of Figure 6, `igraph` is required:
+
+   `pip install python-igraph`
+
+
+
+
 If using the R preprocessing code, we recommend installing the following:
 
 `Seurat 3`, `scran`, `SingleCellExperiment`. `scRNAseq`, `BiocSingular`, `igraph`, `dplyr` and `textshape`.
 
+
+
 ## Usage
 
-The `train.py` file can be invoked with the arguments detailed below:
+Invoke the training script with `python -m cellvgae` with the arguments detailed below:
 
 ```
 usage: train [-h] [--input_gene_expression_path INPUT_GENE_EXPRESSION_PATH] [--hvg HVG] [--khvg KHVG] [--graph_type {KNN Scanpy,KNN Faiss,PKNN}] [--k K] [--graph_n_pcs GRAPH_N_PCS]
              [--graph_metric {euclidean,manhattan,cosine}] [--graph_distance_cutoff_num_stds GRAPH_DISTANCE_CUTOFF_NUM_STDS] [--save_graph] [--raw_counts] [--faiss_gpu]
              [--hvg_file_path HVG_FILE_PATH] [--khvg_file_path KHVG_FILE_PATH] [--graph_file_path GRAPH_FILE_PATH] [--graph_convolution {GAT,GATv2,GCN}] [--num_hidden_layers {2,3}]
              [--num_heads [NUM_HEADS [NUM_HEADS ...]]] [--hidden_dims [HIDDEN_DIMS [HIDDEN_DIMS ...]]] [--dropout [DROPOUT [DROPOUT ...]]] [--latent_dim LATENT_DIM] [--loss {kl,mmd}] [--lr LR]
-             [--epochs EPOCHS] [--val_split VAL_SPLIT] [--test_split TEST_SPLIT] [--transpose_input] [--use_linear_decoder] [--decoder_nn_dim1 DECODER_NN_DIM1] [--name NAME] --model_save_path
-             MODEL_SAVE_PATH [--umap] [--hdbscan]
+             [--epochs EPOCHS] [--val_split VAL_SPLIT] [--test_split TEST_SPLIT] [--transpose_input] [--use_linear_decoder] [--decoder_nn_dim1 DECODER_NN_DIM1] [--name NAME] --model_save_path MODEL_SAVE_PATH [--umap] [--hdbscan]
 
 Train CellVGAE.
 

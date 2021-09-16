@@ -9,8 +9,7 @@ class CellVGAE_Encoder(nn.Module):
     def __init__(self, num_hidden_layers, num_heads, in_channels, hidden_dims, latent_dim, dropout, concat, v2=False):
         super(CellVGAE_Encoder, self).__init__()
         assert (num_hidden_layers == 2 or num_hidden_layers == 3), 'The number of hidden layers must be 2 or 3.'
-        assert (num_hidden_layers == len(hidden_dims) and num_hidden_layers == len(dropout)
-                ), 'The number of hidden layers must match the number of hidden output dimensions and the number of hidden dropout values.'
+        assert (num_hidden_layers == len(hidden_dims)), 'The number of hidden layers must match the number of hidden output dimensions.'
 
         self.in_channels = in_channels
         self.latent_dim = latent_dim

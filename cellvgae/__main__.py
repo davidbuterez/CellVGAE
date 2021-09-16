@@ -32,10 +32,10 @@ from torch.autograd import Variable
 from sklearn.preprocessing import MinMaxScaler
 from termcolor import colored
 
-from models import CellVGAE, CellVGAE_Encoder
-from models import mmd
+from cellvgae import CellVGAE, CellVGAE_Encoder, CellVGAE_GCNEncoder, compute_mmd
 
-def user_prompt() -> bool:
+
+def _user_prompt() -> bool:
     # Credit for function: https://stackoverflow.com/a/50216611
     """ Prompt the yes/no-*question* to the user. """
     from distutils.util import strtobool
@@ -48,12 +48,12 @@ def user_prompt() -> bool:
             print("Please use y/n or yes/no.\n")
 
 
-def preprocess_raw_counts(adata):
+def _preprocess_raw_counts(adata):
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
 
 
-def load_input_file(path):
+def _load_input_file(path):
     if path[-5:] == '.h5ad':
         adata = anndata.read_h5ad(path)
     elif path[-4:] == '.csv':
@@ -61,14 +61,14 @@ def load_input_file(path):
     return adata
 
 
-def prepare_training_data(args):
+def _prepare_training_data(args):
     print('Preparing training data...')
-    adata = load_input_file(args['input_gene_expression_path'])
+    adata = _load_input_file(args['input_gene_expression_path'])
     print(f'Original data shape: {adata.shape}')
 
     if (np.abs(adata.shape[0] - 20000) < 5000) and (adata.shape[0] / adata.shape[1] > 0.4) and not args['transpose_input']:
         print(colored('WARNING: --transpose_input not provided but input data might have genes in the fist dimension. Are you sure you want to continue?', 'yellow'))
-        answer = user_prompt()
+        answer = _user_prompt()
         if not answer:
             sys.exit(0)
 
@@ -79,7 +79,7 @@ def prepare_training_data(args):
     adata_pp = adata.copy()
     if args['raw_counts']:
         print('Applying raw counts preprocessing...')
-        preprocess_raw_counts(adata_pp)
+        _preprocess_raw_counts(adata_pp)
     else:
         print('Applying log-normalisation...')
         sc.pp.log1p(adata_pp, copy=False)
@@ -101,19 +101,19 @@ def prepare_training_data(args):
     return adata_hvg, adata_khvg, X_hvg, X_khvg
 
 
-def load_separate_hvg(hvg_path):
-    adata = load_input_file(hvg_path)
+def _load_separate_hvg(hvg_path):
+    adata = _load_input_file(hvg_path)
     return adata
 
 
-def load_separate_graph_edgelist(edgelist_path):
+def _load_separate_graph_edgelist(edgelist_path):
     edgelist = []
     with open(edgelist_path, 'r') as edgelist_file:
         edgelist = [(int(item.split()[0]), int(item.split()[1])) for item in edgelist_file.readlines()]
     return edgelist
 
 
-def knn_faiss(data_numpy, k, metric='euclidean', use_gpu=False):    
+def _knn_faiss(data_numpy, k, metric='euclidean', use_gpu=False):    
     data_numpy = data_numpy.astype(np.float32)
     data_numpy = data_numpy.copy(order='C')
     data_numpy = np.ascontiguousarray(data_numpy, dtype=np.float32)
@@ -148,7 +148,7 @@ def knn_faiss(data_numpy, k, metric='euclidean', use_gpu=False):
     return distances, neighbors
 
 
-def correlation(data_numpy, k, corr_type='pearson'):
+def _correlation(data_numpy, k, corr_type='pearson'):
     df = pd.DataFrame(data_numpy.T)
     corr = df.corr(method=corr_type)
     nlargest = k
@@ -158,7 +158,7 @@ def correlation(data_numpy, k, corr_type='pearson'):
     return corr, neighbors
     
 
-def prepare_graphs(adata_khvg, X_khvg, args):
+def _prepare_graphs(adata_khvg, X_khvg, args):
     if args['graph_type'] == 'KNN Scanpy':
         print('Computing KNN Scanpy graph ("{}" metric)...'.format(args['graph_metric']))
         distances = sc.pp.neighbors(adata_khvg, n_neighbors=args['k'] + 1, n_pcs=args['graph_n_pcs'], knn=True, metric=args['graph_metric'], copy=True).obsp['distances'].A
@@ -169,10 +169,13 @@ def prepare_graphs(adata_khvg, X_khvg, args):
 
     elif args['graph_type'] == 'KNN Faiss':
         print('Computing KNN Faiss graph ("{}" metric)...'.format(args['graph_metric']))
-        distances, neighbors = knn_faiss(data_numpy=X_khvg, k=args['k'] + 1, metric=args['graph_metric'], use_gpu=args['faiss_gpu'])
+        distances, neighbors = _knn_faiss(data_numpy=X_khvg, k=args['k'] + 1, metric=args['graph_metric'], use_gpu=args['faiss_gpu'])
     elif args['graph_type'] == 'PKNN':
         print('Computing PKNN graph...')
-        distances, neighbors = correlation(data_numpy=X_khvg, k=args['k'] + 1)
+        distances, neighbors = _correlation(data_numpy=X_khvg, k=args['k'] + 1)
+    # else:
+    #     print(colored('Graph generation enabled but graph type not provided. Exiting...', 'red'))
+    #     sys.exit(1)
 
     if args['graph_distance_cutoff_num_stds']:
         cutoff = np.mean(np.nonzero(distances), axis=None) + float(args['graph_distance_cutoff_num_stds']) * np.std(np.nonzero(distances), axis=None)
@@ -222,7 +225,7 @@ def prepare_graphs(adata_khvg, X_khvg, args):
     return edgelist
 
 
-def train(model, optimizer, train_data, loss, device, use_decoder_loss=False, conv_type='GAT'):
+def _train(model, optimizer, train_data, loss, device, use_decoder_loss=False, conv_type='GAT'):
     model = model.train()
 
     epoch_loss = 0.0
@@ -239,7 +242,7 @@ def train(model, optimizer, train_data, loss, device, use_decoder_loss=False, co
 
     if loss == 'mmd':
         true_samples = Variable(torch.randn(x.shape[0], args['latent_dim']), requires_grad=False)
-        mmd_loss = mmd.compute_mmd(true_samples.to(device), z)
+        mmd_loss = compute_mmd(true_samples.to(device), z)
 
         loss = reconstruction_loss + mmd_loss
     else:
@@ -266,22 +269,22 @@ def train(model, optimizer, train_data, loss, device, use_decoder_loss=False, co
 
 
 @torch.no_grad()
-def test(data):
+def _test(model, device, data, graph_conv):
     model.eval()
-    if args['graph_convolution'] in ['GAT', 'GATv2']:
+    if graph_conv in ['GAT', 'GATv2']:
         z, _ = model.encode(data.x.to(torch.float).to(device), data.edge_index.to(torch.long).to(device))
     else:
         z = model.encode(data.x.to(torch.float).to(device), data.edge_index.to(torch.long).to(device))
     return model.test(z, data.pos_edge_label_index.to(torch.long).to(device), data.neg_edge_label_index.to(torch.long).to(device))  
 
 
-def setup(args):
+def _setup(args, device):
     if not args['hvg_file_path']:
-        adata_hvg, adata_khvg, X_hvg, X_khvg = prepare_training_data(args)
+        adata_hvg, adata_khvg, X_hvg, X_khvg = _prepare_training_data(args)
     else:
         assert args['khvg_file_path'] is not None
-        adata_hvg = load_separate_hvg(hvg_path=args['hvg_file_path'])
-        adata_khvg = load_separate_hvg(hvg_path=args['khvg_file_path'])
+        adata_hvg = _load_separate_hvg(hvg_path=args['hvg_file_path'])
+        adata_khvg = _load_separate_hvg(hvg_path=args['khvg_file_path'])
         if args['transpose_input']:
             print(f'Transposing input HVG file to {adata_hvg.shape[::-1]}...')
             adata_hvg = adata_hvg.copy().transpose()
@@ -293,14 +296,14 @@ def setup(args):
 
     if not args['graph_file_path']:
         try:
-            edgelist = prepare_graphs(adata_khvg, X_khvg, args)
+            edgelist = _prepare_graphs(adata_khvg, X_khvg, args)
         except ValueError as ve:
             print()
             print(colored('Exception: ' + str(ve), 'red'))
             print('Might need to transpose input with the --transpose_input argument.')
             sys.exit(1)
     else:
-        edgelist = load_separate_graph_edgelist(args['graph_file_path'])
+        edgelist = _load_separate_graph_edgelist(args['graph_file_path'])
 
     num_nodes = X_hvg.shape[0]
     print(f'Number of nodes in graph: {num_nodes}.')
@@ -341,7 +344,7 @@ def setup(args):
             num_heads['mean'] = args['num_heads'][3]
             num_heads['std'] = args['num_heads'][4]
 
-        encoder = CellVGAE_Encoder.CellVGAE_Encoder(
+        encoder = CellVGAE_Encoder(
             in_channels=num_features, num_hidden_layers=args['num_hidden_layers'],
             num_heads=num_heads,
             hidden_dims=args['hidden_dims'],
@@ -350,13 +353,13 @@ def setup(args):
             v2=args['graph_convolution'] == 'GATv2',
             concat={'first': True, 'second': True})
     else:
-        encoder = CellVGAE_Encoder.CellVGAE_GCNEncoder(
+        encoder = CellVGAE_GCNEncoder(
             in_channels=num_features,
             num_hidden_layers=args['num_hidden_layers'],
             hidden_dims=args['hidden_dims'],
             latent_dim=args['latent_dim'])
 
-    model = CellVGAE.CellVGAE(encoder=encoder, decoder_nn_dim1=args['decoder_nn_dim1'], gcn_or_gat=args['graph_convolution'])
+    model = CellVGAE(encoder=encoder, decoder_nn_dim1=args['decoder_nn_dim1'], gcn_or_gat=args['graph_convolution'])
     optimizer = torch.optim.Adam(model.parameters(), lr=args['lr'])
     model = model.to(device)
 
@@ -487,7 +490,7 @@ if __name__ == '__main__':
         print()
         print(colored('WARNING: --decoder_nn_dim1 provided but --use_linear_decoder is not set. Ignoring --decoder_nn_dim1.\n', 'yellow'))
 
-    model, optimizer, train_data, val_data, test_data = setup(args)
+    model, optimizer, train_data, val_data, test_data = _setup(args, device=device)
     if torch.cuda.is_available():
         print(f'\nCUDA available, using {torch.cuda.get_device_name(device)}.')
     print('Neural model details: \n')
@@ -514,18 +517,18 @@ if __name__ == '__main__':
 
     # Train/val/test code
     for epoch in tqdm(range(1, args['epochs'] + 1)):
-        epoch_loss, decoder_loss = train(model, optimizer, train_data, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
+        epoch_loss, decoder_loss = _train(model, optimizer, train_data, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
         if args['use_linear_decoder']:
             print('Epoch {:03d} -- Total epoch loss: {:.4f} -- NN decoder epoch loss: {:.4f}'.format(epoch, epoch_loss, decoder_loss))
         else:
             print('Epoch {:03d} -- Total epoch loss: {:.4f}'.format(epoch, epoch_loss))
 
         if args['val_split']:
-            auroc, ap = test(val_data)
+            auroc, ap = _test(val_data)
             print('Validation AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
 
     if args['test_split']:
-        auroc, ap = test(test_data)
+        auroc, ap = _test(test_data)
         print('Test AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
 
     # Save node embeddings

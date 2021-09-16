@@ -57,13 +57,13 @@ def latent_dim_participation_in_clusters(latent_data, labels):
     return latent_diff
 
 
-def indices_of_top_k(arr, k):
+def _indices_of_top_k(arr, k):
     return np.argpartition(arr, -k)[-k:]
 
 
 def select_genes_by_latent_dim(matrix, latent_dim, top_k):
     corresponding_to_latent_dim = matrix[:, latent_dim]
-    return indices_of_top_k(corresponding_to_latent_dim.detach().numpy(), top_k)
+    return _indices_of_top_k(corresponding_to_latent_dim.detach().numpy(), top_k)
 
 
 def merged_count(list_of_tuples):
