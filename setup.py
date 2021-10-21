@@ -8,7 +8,7 @@ long_description = (this_directory / 'README.md').read_text()
 setup(
   name = 'cellvgae',
   packages = ['cellvgae'],
-  version = '0.0.1b1',
+  version = '0.0.1b2',
   license='MIT',
   description = 'CellVGAE uses the connectivity between cells (such as k-nearest neighbour graphs) with gene expression values as node features to learn high-quality cell representations in a lower-dimensional space',
   author = 'David Buterez',
@@ -19,7 +19,6 @@ setup(
         "torch>=1.6.0",
         "umap_learn>=0.5.1",
         "hdbscan>=0.8.27",
-        "faiss-cpu>=1.7.0",
         "seaborn>=0.11.1",
         "matplotlib>=3.3.4",
         "scanpy>=1.7.2",

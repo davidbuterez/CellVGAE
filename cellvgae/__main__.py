@@ -16,7 +16,6 @@ import pandas as pd
 import numpy as np
 import anndata
 import scanpy as sc
-import faiss
 import random
 
 import umap
@@ -113,7 +112,9 @@ def _load_separate_graph_edgelist(edgelist_path):
     return edgelist
 
 
-def _knn_faiss(data_numpy, k, metric='euclidean', use_gpu=False):    
+def _knn_faiss(data_numpy, k, metric='euclidean', use_gpu=False):
+    import faiss
+
     data_numpy = data_numpy.astype(np.float32)
     data_numpy = data_numpy.copy(order='C')
     data_numpy = np.ascontiguousarray(data_numpy, dtype=np.float32)
@@ -123,7 +124,7 @@ def _knn_faiss(data_numpy, k, metric='euclidean', use_gpu=False):
         res = faiss.StandardGpuResources()
     else:
         print('Using CPU for Faiss...')
-    
+
     if metric == 'euclidean':
         index = faiss.IndexFlatL2(data_numpy.shape[1])
 
@@ -144,7 +145,7 @@ def _knn_faiss(data_numpy, k, metric='euclidean', use_gpu=False):
     nprobe = data_numpy.shape[0]
     index.nprobe = nprobe
     distances, neighbors = index.search(data_numpy, k)
-            
+
     return distances, neighbors
 
 
@@ -154,15 +155,15 @@ def _correlation(data_numpy, k, corr_type='pearson'):
     nlargest = k
     order = np.argsort(-corr.values, axis=1)[:, :nlargest]
     neighbors = np.delete(order, 0, 1)
-    
+
     return corr, neighbors
-    
+
 
 def _prepare_graphs(adata_khvg, X_khvg, args):
     if args['graph_type'] == 'KNN Scanpy':
         print('Computing KNN Scanpy graph ("{}" metric)...'.format(args['graph_metric']))
         distances = sc.pp.neighbors(adata_khvg, n_neighbors=args['k'] + 1, n_pcs=args['graph_n_pcs'], knn=True, metric=args['graph_metric'], copy=True).obsp['distances'].A
-        
+
         # Scanpy might not always return neighbors for all graph nodes. Missing nodes have a -1 in the neighbours matrix.
         neighbors = np.full(distances.shape, fill_value=-1)
         neighbors[np.nonzero(distances)] = distances[np.nonzero(distances)]
@@ -233,7 +234,7 @@ def _train(model, optimizer, train_data, loss, device, use_decoder_loss=False, c
     x, edge_index = train_data.x.to(torch.float).to(device), train_data.edge_index.to(torch.long).to(device)
 
     optimizer.zero_grad()
-    
+
     if conv_type in ['GAT', 'GATv2']:
         z, _ = model.encode(x, edge_index)
     else:
@@ -257,7 +258,7 @@ def _train(model, optimizer, train_data, loss, device, use_decoder_loss=False, c
             print(colored('Exception: ' + str(ae), 'red'))
             print('Need to provide the first hidden dimension for the decoder with --decoder_nn_dim1.')
             sys.exit(1)
-            
+
         decoder_loss = torch.nn.functional.mse_loss(reconstructed_features, x) * 10
         loss += decoder_loss
 
@@ -275,7 +276,7 @@ def _test(model, device, data, graph_conv):
         z, _ = model.encode(data.x.to(torch.float).to(device), data.edge_index.to(torch.long).to(device))
     else:
         z = model.encode(data.x.to(torch.float).to(device), data.edge_index.to(torch.long).to(device))
-    return model.test(z, data.pos_edge_label_index.to(torch.long).to(device), data.neg_edge_label_index.to(torch.long).to(device))  
+    return model.test(z, data.pos_edge_label_index.to(torch.long).to(device), data.neg_edge_label_index.to(torch.long).to(device))
 
 
 def _setup(args, device):
@@ -290,7 +291,7 @@ def _setup(args, device):
             adata_hvg = adata_hvg.copy().transpose()
             print(f'Transposing input KHVG file to {adata_khvg.shape[::-1]}...')
             adata_khvg = adata_khvg.copy().transpose()
-        
+
         X_hvg = adata_hvg.X
         X_khvg = adata_khvg.X
 
@@ -380,7 +381,7 @@ if __name__ == '__main__':
     parser.add_argument('--graph_type', choices=['KNN Scanpy', 'KNN Faiss', 'PKNN'], help='Type of graph.')
     parser.add_argument('--k', type=int, help='K for KNN or Pearson (PKNN) graph.')
     parser.add_argument('--graph_n_pcs', type=int, help='Use this many Principal Components for the KNN (only Scanpy).')
-    parser.add_argument('--graph_metric', choices=['euclidean', 'manhattan', 'cosine'], default='euclidean')
+    parser.add_argument('--graph_metric', choices=['euclidean', 'manhattan', 'cosine'], required=False)
     parser.add_argument('--graph_distance_cutoff_num_stds', type=float, default=0.0, help='Number of standard deviations to add to the mean of distances/correlation values. Can be negative.')
     parser.add_argument('--save_graph', action='store_true', default=False, help='Save the generated graph to the output path specified by --model_save_path.')
     parser.add_argument('--raw_counts', action='store_true', default=False, help='Enable preprocessing recipe for raw counts.')
@@ -451,6 +452,9 @@ if __name__ == '__main__':
 
     if (args['graph_file_path'] is not None) and (args['graph_type'] is not None):
         raise ValueError('Cannot use custom graph file when --graph_type is specified.')
+
+    if (args['graph_file_path'] is not None) and (args['graph_metric'] is not None):
+        raise ValueError('Cannot use custom graph file when --graph_metric is specified.')
 
     if (args['graph_file_path'] is not None) and (args['k'] is not None):
         raise ValueError('Cannot use custom graph file when --k is specified.')
@@ -555,7 +559,7 @@ if __name__ == '__main__':
     node_filepath = os.path.join(args['model_save_path'], filename)
     np.save(node_filepath, node_embeddings)
 
-    # Save model        
+    # Save model
     if args['name']:
         filename = f'{args["name"]}_CellVGAE_model.pt'
     else:
@@ -575,7 +579,7 @@ if __name__ == '__main__':
 
             torch.save(edge_index, edges_filepath)
             torch.save(attention_weights, attn_w_filepath)
-        
+
         edge_index, attention_weights = attn_w[-2]
         edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
         mu_edges_filepath = _get_filepath(args, number_or_name='mu', edge_or_weights='edge_index')
@@ -618,7 +622,7 @@ if __name__ == '__main__':
             cl_size, min_sample = k
             np.save(os.path.join(hdbscan_save_dir, f'hdbscan-clusters-min_cluster_size={cl_size}-min_samples={min_sample}.npy'), clusters)
 
-    
+
     # Save plots
     if args['umap']:
         filename = args['name'] + '_' if args['name'] else ''
@@ -646,8 +650,8 @@ if __name__ == '__main__':
                 ax.set_xticklabels([])
                 ax.set_xticks([], minor=True)
                 ax.set_yticks([], minor=True)
-                ax.xaxis.set_ticks_position('none') 
-                ax.yaxis.set_ticks_position('none') 
+                ax.xaxis.set_ticks_position('none')
+                ax.yaxis.set_ticks_position('none')
                 plt.xticks([])
                 plt.yticks([])
                 ax.axis('equal')
@@ -677,7 +681,7 @@ if __name__ == '__main__':
 
                 for attempt in range(10):
                     try:
-                        colours = random.sample(c, len(clusters_set))   
+                        colours = random.sample(c, len(clusters_set))
                     except ValueError:
                         c = c + c
                     else:
@@ -688,7 +692,7 @@ if __name__ == '__main__':
 
                 cluster_to_colour = dict(zip(clusters_set, colours))
                 colours_to_plot = [cluster_to_colour[clstr] for clstr in clusters]
-                
+
                 sns.scatterplot(x=u[:, 0], y=u[:, 1], hue=clusters, palette=colours, s=8, linewidth=0.0, ax=ax)
                 ax.legend(prop={'size': 3}, bbox_to_anchor=(1.05, 0.98), borderaxespad=-1.5, labelspacing=1, frameon=False, handletextpad=0.75)
                 ax.set_title(f'min_cluster_size={cl_sizes[i]}, min_samples={min_samples[j]}', y=1.0, fontdict={'fontsize': 12})

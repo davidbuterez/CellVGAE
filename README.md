@@ -28,10 +28,14 @@ Installing CellVGAE with pip will attempt to install PyTorch, PyTorch Geometric 
    
    
 
-3. Install Faiss CPU:  
+3. (Optional) Install Faiss CPU:  
 
    `conda install -c pytorch faiss-cpu`
+
    
+
+   Faiss is only required if using the option `--graph_type "KNN Faiss"` .  It is a soft dependency as it is not available for some platforms (currently Apple M1). Attempting to use CellVGAE with Faiss without installing it will result in an exception.
+
    A GPU version of Faiss for CUDA 11.1 is not yet available.
 
    
@@ -60,7 +64,7 @@ If using the R preprocessing code, we recommend installing the following:
 Using the example files in this repo (.h5ad file is the same as downloaded by Scanpy 1.8.1):
 
 ```bash
-python -m cellvgae --input_gene_expression_path "example_data/paul15_myeloid_scanpy.h5ad" --graph_file_path "example_data/paul15_Faiss_KNN_K3_KHVG2500.txt" --graph_metric "euclidean" --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out"
+python -m cellvgae --input_gene_expression_path "example_data/paul15_myeloid_scanpy.h5ad" --graph_file_path "example_data/paul15_Faiss_KNN_K3_KHVG2500.txt" --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out"
 ```
 
 Other examples are available in `examples/cellvgae_example_scripts.txt`
