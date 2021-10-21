@@ -10,7 +10,7 @@ CellVGAE uses the connectivity between cells (such as *k*-nearest neighbour grap
 
 ## Requirements
 
-Installing CellVGAE with pip will attempt to install PyTorch, PyTorch Geometric and Faiss, however it is recommended that the appropriate GPU/CPU versions are installed manually beforehand. For Linux:
+Installing CellVGAE with pip will attempt to install PyTorch and PyTorch Geometric, however it is recommended that the appropriate GPU/CPU versions are installed manually beforehand. For Linux:
 
 1. Install PyTorch GPU: 
 
