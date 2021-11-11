@@ -174,9 +174,7 @@ def _prepare_graphs(adata_khvg, X_khvg, args):
     elif args['graph_type'] == 'PKNN':
         print('Computing PKNN graph...')
         distances, neighbors = _correlation(data_numpy=X_khvg, k=args['k'] + 1)
-    # else:
-    #     print(colored('Graph generation enabled but graph type not provided. Exiting...', 'red'))
-    #     sys.exit(1)
+
 
     if args['graph_distance_cutoff_num_stds']:
         cutoff = np.mean(np.nonzero(distances), axis=None) + float(args['graph_distance_cutoff_num_stds']) * np.std(np.nonzero(distances), axis=None)
@@ -271,12 +269,12 @@ def _train(model, optimizer, train_data, loss, device, use_decoder_loss=False, c
 
 @torch.no_grad()
 def _test(model, device, data, graph_conv):
-    model.eval()
+    model = model.eval()
     if graph_conv in ['GAT', 'GATv2']:
         z, _ = model.encode(data.x.to(torch.float).to(device), data.edge_index.to(torch.long).to(device))
     else:
         z = model.encode(data.x.to(torch.float).to(device), data.edge_index.to(torch.long).to(device))
-    return model.test(z, data.pos_edge_label_index.to(torch.long).to(device), data.neg_edge_label_index.to(torch.long).to(device))
+    return *model.test(z, data.pos_edge_label_index.to(torch.long).to(device), data.neg_edge_label_index.to(torch.long).to(device)), z
 
 
 def _setup(args, device):
@@ -319,9 +317,20 @@ def _setup(args, device):
 
     data_obj.train_mask = data_obj.val_mask = data_obj.test_mask = data_obj.y = None
 
+    if (args['load_model_path'] is not None):
+        print('Assuming loaded model is used for testing.')
+        # PyTorch Geometric does not allow 0 training samples (all test), so we need to store all test data as 'training'.
+        test_split = 0.0
+        val_split = 0.0
+    else:
+        test_split = args['test_split']
+        val_split = args['val_split']
+
     # Can set validation ratio
     try:
-        transform = T.RandomLinkSplit(num_val=args['val_split'], num_test=args['test_split'], is_undirected=True, add_negative_train_samples=False, split_labels=True)
+        add_negative_train_samples = args['load_model_path'] is not None
+
+        transform = T.RandomLinkSplit(num_val=val_split, num_test=test_split, is_undirected=True, add_negative_train_samples=add_negative_train_samples, split_labels=True)
         train_data, val_data, test_data = transform(data_obj)
     except IndexError as ie:
         print()
@@ -404,9 +413,10 @@ if __name__ == '__main__':
     parser.add_argument('--use_linear_decoder', action='store_true', default=False, help='Turn on a neural network decoder, similar to traditional VAEs.')
     parser.add_argument('--decoder_nn_dim1', help='First hidden dimenson for the neural network decoder, if specified using --use_linear_decoder.', type=int)
     parser.add_argument('--name', help='Name used for the written output files.', type=str)
-    parser.add_argument('--model_save_path', required=True, help='Path to save PyTorch model and output files. Will create the entire path if necessary.', type=str)
+    parser.add_argument('--model_save_path', help='Path to save PyTorch model and output files. Will create the entire path if necessary.', type=str)
     parser.add_argument('--umap', action='store_true', default=False, help='Compute and save the 2D UMAP embeddings of the output node features.')
     parser.add_argument('--hdbscan', action='store_true', default=False, help='Compute and save different HDBSCAN clusterings.')
+    parser.add_argument('--load_model_path', help='Path to previously saved PyTorch state_dict object.')
 
     args = parser.parse_args()
 
@@ -424,6 +434,9 @@ if __name__ == '__main__':
     assert args['lr'] > 0, 'Learning rate must be greateer than 0.'
     assert args['val_split'] >= 0, 'Negative values for the validation split are not allowed.'
     assert args['test_split'] >= 0, 'Negative values for the test split are not allowed.'
+
+    if (args['load_model_path'] is not None) and (args['model_save_path'] is not None):
+        print('WARNING: Loading existing model; model state_dict will not be saved in model_save_path, but the path will be used for other outputs.\nSome arguments like --epochs are not used anymore, but please provide all hyperparameters.')
 
     if args['decoder_nn_dim1']:
         assert args['decoder_nn_dim1'] > 0, 'Number of latent dimensions must be greateer than 0.'
@@ -511,88 +524,105 @@ if __name__ == '__main__':
     else:
         print('Using MMD loss.')
 
-    print(f'Number of train edges {train_data.edge_index.shape[1]}.\n')
+    print(f'Number of train (test if using --load_model_path) edges = {train_data.edge_index.shape[1]}.\n')
 
     if args['val_split']:
-        print(f'Using validation split of {args["val_split"]}, number of validation edges: {val_data.pos_edge_label_index.shape[1]}.')
+        print(f'Using validation split of {args["val_split"]}, number of validation edges = {val_data.pos_edge_label_index.shape[1]}.')
 
     if args['test_split']:
-        print(f'Using test split of {args["test_split"]}, number of test edges: {test_data.pos_edge_label_index.shape[1]}.')
+        print(f'Using test split of {args["test_split"]}, number of test edges = {test_data.pos_edge_label_index.shape[1]}.')
 
     # Train/val/test code
-    for epoch in tqdm(range(1, args['epochs'] + 1)):
-        epoch_loss, decoder_loss = _train(model, optimizer, train_data, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
-        if args['use_linear_decoder']:
-            print('Epoch {:03d} -- Total epoch loss: {:.4f} -- NN decoder epoch loss: {:.4f}'.format(epoch, epoch_loss, decoder_loss))
-        else:
-            print('Epoch {:03d} -- Total epoch loss: {:.4f}'.format(epoch, epoch_loss))
+    if args['load_model_path']:
+        print(f'Loading model from {args["load_model_path"]}...')
+        model.load_state_dict(torch.load(args['load_model_path']))
+    else:
+        print('Training model...')
+        for epoch in tqdm(range(1, args['epochs'] + 1)):
+            epoch_loss, decoder_loss = _train(model, optimizer, train_data, args['loss'], device=device, use_decoder_loss=args['use_linear_decoder'], conv_type=args['graph_convolution'])
+            if args['use_linear_decoder']:
+                print('Epoch {:03d} -- Total epoch loss: {:.4f} -- NN decoder epoch loss: {:.4f}'.format(epoch, epoch_loss, decoder_loss))
+            else:
+                print('Epoch {:03d} -- Total epoch loss: {:.4f}'.format(epoch, epoch_loss))
 
-        if args['val_split']:
-            auroc, ap = _test(val_data)
-            print('Validation AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
+            if args['val_split']:
+                auroc, ap, _ = _test(model=model, device=device, data=val_data, graph_conv=conv_type)
+                print('Validation AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
 
-    if args['test_split']:
-        auroc, ap = _test(test_data)
-        print('Test AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
+    if (args['load_model_path'] is not None):
+        # Need to store testing data as training as PyTorch Geometric does not allow 0 training samples (all test).
+        auroc, ap, z_nodes_test = _test(model=model, device=device, data=train_data, graph_conv=conv_type)
+
+        # print('Test AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
+    elif args['test_split']:
+        auroc, ap, z_nodes_test = _test(model=model, device=device, data=test_data, graph_conv=conv_type)
+
+        # print('Test AUROC {:.4f} -- AP {:.4f}.'.format(auroc, ap))
 
     # Save node embeddings
     model = model.eval()
     node_embeddings = []
 
-    x, edge_index = train_data.x.to(torch.float).to(device), train_data.edge_index.to(torch.long).to(device)
-    if args['graph_convolution'] in ['GAT', 'GATv2']:
-        z_nodes, attn_w = model.encode(x, edge_index)
+    if (args['load_model_path'] is not None):
+        node_embeddings = z_nodes_test.cpu().detach().numpy()
     else:
-        z_nodes = model.encode(x, edge_index)
-    node_embeddings.append(z_nodes.cpu().detach().numpy())
+        x, edge_index = train_data.x.to(torch.float).to(device), train_data.edge_index.to(torch.long).to(device)
+        if args['graph_convolution'] in ['GAT', 'GATv2']:
+            z_nodes, attn_w = model.encode(x, edge_index)
+        else:
+            z_nodes = model.encode(x, edge_index)
+        node_embeddings.append(z_nodes.cpu().detach().numpy())
 
-    node_embeddings = np.array(node_embeddings)
-    node_embeddings = node_embeddings.squeeze()
+        node_embeddings = np.array(node_embeddings)
+        node_embeddings = node_embeddings.squeeze()
 
     Path(args['model_save_path']).mkdir(parents=True, exist_ok=True)
 
     if args['name']:
         filename = f'{args["name"]}_CellVGAE_node_embeddings.npy'
-    else:
+    elif (args['load_model_path'] is None):
         filename = 'cellvgae_node_embeddings.npy'
+    else:
+        filename = 'cellvgae_test_node_embeddings.npy'
 
     node_filepath = os.path.join(args['model_save_path'], filename)
     np.save(node_filepath, node_embeddings)
 
     # Save model
-    if args['name']:
-        filename = f'{args["name"]}_CellVGAE_model.pt'
-    else:
-        filename = 'cellvgae_model.pt'
+    if (args['load_model_path'] is None):
+        if args['name']:
+            filename = f'{args["name"]}_CellVGAE_model.pt'
+        else:
+            filename = 'cellvgae_model.pt'
 
-    model_filepath = os.path.join(args['model_save_path'], filename)
-    torch.save(model.state_dict(), model_filepath)
+        model_filepath = os.path.join(args['model_save_path'], filename)
+        torch.save(model.state_dict(), model_filepath)
 
-    # Save attention weights
-    if args['graph_convolution'] in ['GAT', 'GATv2']:
-        for i in range(args['num_hidden_layers']):
-            edge_index, attention_weights = attn_w[i]
+        # Save attention weights
+        if args['graph_convolution'] in ['GAT', 'GATv2']:
+            for i in range(args['num_hidden_layers']):
+                edge_index, attention_weights = attn_w[i]
+                edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
+
+                edges_filepath = _get_filepath(args, number_or_name=i+1, edge_or_weights='edge_index')
+                attn_w_filepath = _get_filepath(args, number_or_name=i+1, edge_or_weights='attention_weights')
+
+                torch.save(edge_index, edges_filepath)
+                torch.save(attention_weights, attn_w_filepath)
+
+            edge_index, attention_weights = attn_w[-2]
             edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
+            mu_edges_filepath = _get_filepath(args, number_or_name='mu', edge_or_weights='edge_index')
+            mu_attn_w_filepath = _get_filepath(args, number_or_name='mu', edge_or_weights='attention_weights')
+            torch.save(edge_index, mu_edges_filepath)
+            torch.save(attention_weights, mu_attn_w_filepath)
 
-            edges_filepath = _get_filepath(args, number_or_name=i+1, edge_or_weights='edge_index')
-            attn_w_filepath = _get_filepath(args, number_or_name=i+1, edge_or_weights='attention_weights')
-
-            torch.save(edge_index, edges_filepath)
-            torch.save(attention_weights, attn_w_filepath)
-
-        edge_index, attention_weights = attn_w[-2]
-        edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
-        mu_edges_filepath = _get_filepath(args, number_or_name='mu', edge_or_weights='edge_index')
-        mu_attn_w_filepath = _get_filepath(args, number_or_name='mu', edge_or_weights='attention_weights')
-        torch.save(edge_index, mu_edges_filepath)
-        torch.save(attention_weights, mu_attn_w_filepath)
-
-        edge_index, attention_weights = attn_w[-1]
-        edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
-        sigma_edges_filepath = _get_filepath(args, number_or_name='sigma', edge_or_weights='edge_index')
-        sigma_attn_w_filepath = _get_filepath(args, number_or_name='sigma', edge_or_weights='attention_weights')
-        torch.save(edge_index, sigma_edges_filepath)
-        torch.save(attention_weights, sigma_attn_w_filepath)
+            edge_index, attention_weights = attn_w[-1]
+            edge_index, attention_weights = edge_index.detach().cpu(), attention_weights.detach().cpu()
+            sigma_edges_filepath = _get_filepath(args, number_or_name='sigma', edge_or_weights='edge_index')
+            sigma_attn_w_filepath = _get_filepath(args, number_or_name='sigma', edge_or_weights='attention_weights')
+            torch.save(edge_index, sigma_edges_filepath)
+            torch.save(attention_weights, sigma_attn_w_filepath)
 
     # UMAP
     if args['umap']:
