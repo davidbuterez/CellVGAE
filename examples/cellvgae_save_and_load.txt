@@ -2,7 +2,7 @@
 
 python -m cellvgae --input_gene_expression_path "data/paul15_myeloid_scanpy.h5ad" --hvg 1000 --khvg 250 --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --epochs 50 --model_save_path "model_saved_out"
 
-# Use --load_model_path to specify a previously saved PyTorch model/state_dict after providing all hyperparameters. 
-The new embeddings will be saved to the directory specified by --model_out_path
+# Use --load_model_path to specify a previously saved PyTorch model/state_dict after providing all hyperparameters.
+# The new embeddings will be saved to the directory specified by --model_out_path
 
 python -m cellvgae --input_gene_expression_path "data/paul15_myeloid_scanpy_test.h5ad" --hvg 1000 --khvg 250 --graph_type "KNN Scanpy" --k 10 --graph_metric "euclidean" --save_graph --graph_convolution "GAT" --num_hidden_layers 2 --hidden_dims 128 128 --num_heads 3 3 3 3 --dropout 0.4 0.4 0.4 0.4 --latent_dim 50 --load_model_path "model_saved_out/cellvgae_model.pt" --model_out_path "model_saved_out" --umap --hdbscan
