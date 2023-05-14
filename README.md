@@ -137,3 +137,23 @@ optional arguments:
   --umap                Compute and save the 2D UMAP embeddings of the output node features.
   --hdbscan             Compute and save different HDBSCAN clusterings.
 ```
+
+## Citation
+
+```
+@article{10.1093/bioinformatics/btab804,
+    author = {Buterez, David and Bica, Ioana and Tariq, Ifrah and Andrés-Terré, Helena and Liò, Pietro},
+    title = "{CellVGAE: an unsupervised scRNA-seq analysis workflow with graph attention networks}",
+    journal = {Bioinformatics},
+    volume = {38},
+    number = {5},
+    pages = {1277-1286},
+    year = {2021},
+    month = {12},
+    abstract = "{Single-cell RNA sequencing allows high-resolution views of individual cells for libraries of up to millions of samples, thus motivating the use of deep learning for analysis. In this study, we introduce the use of graph neural networks for the unsupervised exploration of scRNA-seq data by developing a variational graph autoencoder architecture with graph attention layers that operates directly on the connectivity between cells, focusing on dimensionality reduction and clustering. With the help of several case studies, we show that our model, named CellVGAE, can be effectively used for exploratory analysis even on challenging datasets, by extracting meaningful features from the data and providing the means to visualize and interpret different aspects of the model.We show that CellVGAE is more interpretable than existing scRNA-seq variational architectures by analysing the graph attention coefficients. By drawing parallels with other scRNA-seq studies on interpretability, we assess the validity of the relationships modelled by attention, and furthermore, we show that CellVGAE can intrinsically capture information such as pseudotime and NF-ĸB activation dynamics, the latter being a property that is not generally shared by existing neural alternatives. We then evaluate the dimensionality reduction and clustering performance on 9 difficult and well-annotated datasets by comparing with three leading neural and non-neural techniques, concluding that CellVGAE outperforms competing methods. Finally, we report a decrease in training times of up to × 20 on a dataset of 1.3 million cells compared to existing deep learning architectures.The CellVGAE code is available at https://github.com/davidbuterez/CellVGAE.Supplementary data are available at Bioinformatics online.}",
+    issn = {1367-4803},
+    doi = {10.1093/bioinformatics/btab804},
+    url = {https://doi.org/10.1093/bioinformatics/btab804},
+    eprint = {https://academic.oup.com/bioinformatics/article-pdf/38/5/1277/49009403/btab804.pdf},
+}
+```
